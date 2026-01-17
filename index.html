@@ -3,107 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PDF串刺し採点プロ (2点タップ指定版)</title>
+    <title>PDF串刺し採点プロ (位置ズレ完全修正版)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
-        body { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
-        #selection-canvas { cursor: crosshair; touch-action: none; }
-        .crop-item { border-bottom: 2px solid #e2e8f0; display: flex; align-items: center; gap: 1rem; padding: 0.75rem; }
-        .canvas-wrapper { position: relative; border: 1px solid #cbd5e1; background: white; flex-shrink: 0; }
-        .mark-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
-        .tab-btn.active { background-color: #3b82f6; color: white; border-color: #2563eb; }
-        .mode-btn { transition: all 0.2s; border: 2px solid #e2e8f0; }
-        .mode-btn.active { background-color: #ef4444; color: white; border-color: #b91c1c; transform: scale(1.02); }
-        .btn-shadow { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+        body { touch-action: none; -webkit-user-select: none; user-select: none; overflow: hidden; }
+        #canvas-container { 
+            position: relative; 
+            width: 100%; 
+            height: calc(100vh - 180px); 
+            overflow: hidden; 
+            background: #cbd5e1;
+            cursor: grab;
+        }
+        #canvas-container:active { cursor: grabbing; }
+        canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+        .scoring-item { border-bottom: 2px solid #e2e8f0; padding: 1rem; background: white; }
+        .mode-btn.active { background-color: #ef4444 !important; color: white !important; border-color: #b91c1c !important; }
+        .tab-btn.active { background-color: #3b82f6 !important; color: white !important; border-bottom: 4px solid #1d4ed8; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .modal { background: rgba(0,0,0,0.8); display: none; position: fixed; inset: 0; z-index: 100; align-items: center; justify-content: center; }
     </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-2 md:p-4">
+<body class="bg-slate-100 min-h-screen font-sans text-slate-900">
 
-    <div class="max-w-6xl mx-auto bg-white shadow-2xl rounded-3xl overflow-hidden">
-        <header class="bg-slate-800 p-4 text-white flex justify-between items-center no-print">
+    <!-- Modal for page count -->
+    <div id="page-modal" class="modal">
+        <div class="bg-white p-8 rounded-3xl max-w-sm w-full shadow-2xl text-center border-t-8 border-blue-500">
+            <h3 class="text-xl font-black mb-4 italic text-blue-600 italic">PAGE SETUP</h3>
+            <p class="text-sm text-slate-500 mb-6 font-bold">1人あたりの枚数を指定してください<br><span class="text-[10px] text-slate-400">（例：裏表テストなら 2）</span></p>
+            <input type="number" id="pages-per-student" value="1" min="1" class="w-full text-center text-4xl font-black border-b-4 border-blue-500 mb-8 outline-none text-blue-600">
+            <button id="confirm-pages" class="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all active:scale-95">読み込み開始</button>
+        </div>
+    </div>
+
+    <div class="flex flex-col h-screen">
+        <header class="bg-slate-900 p-3 text-white flex justify-between items-center shrink-0 border-b border-slate-700">
             <div>
-                <h1 class="text-xl font-bold">PDF串刺し採点プロ</h1>
-                <p class="text-[10px] opacity-70 font-bold tracking-widest">Cくん！タップ操作特化モデル</p>
+                <h1 class="text-lg font-bold tracking-tighter italic">SCORING PRO</h1>
+                <p class="text-[9px] opacity-70 font-bold tracking-widest text-blue-400">PRECISION ALIGNMENT MODEL</p>
             </div>
-            <div class="text-right">
-                <div class="text-xs">クラス平均: <span id="avg-score" class="font-bold">0</span> / <span id="total-max-display">0</span></div>
+            <div id="stats" class="text-right hidden">
+                <div class="text-[10px] font-black bg-slate-800 px-3 py-1 rounded-full text-slate-300">
+                    AVG: <span id="avg-score" class="text-yellow-400 text-sm">0</span> / <span id="total-max-display">0</span>
+                </div>
             </div>
         </header>
 
         <!-- Step 1: Upload -->
-        <section id="step-1" class="p-6 no-print">
-            <div class="border-4 border-dashed border-slate-200 rounded-3xl p-10 text-center bg-slate-50 hover:bg-white transition-all">
+        <section id="step-1" class="flex-grow flex items-center justify-center p-6 bg-slate-50">
+            <div class="max-w-xl w-full border-4 border-dashed border-slate-300 rounded-3xl p-12 text-center bg-white shadow-2xl hover:border-blue-500 transition-all cursor-pointer">
                 <input type="file" id="file-input" multiple accept="application/pdf,image/*" class="hidden">
                 <label for="file-input" class="cursor-pointer block">
-                    <div class="text-blue-500 text-5xl mb-4">📁</div>
-                    <div class="text-xl font-bold text-slate-700">生徒全員の答案PDFを選択</div>
-                    <p class="text-sm text-slate-400 mt-2">※1枚目のレイアウトを基準に設定します</p>
+                    <div class="text-blue-500 text-7xl mb-4 opacity-80">📁</div>
+                    <div class="text-2xl font-black text-slate-700">答案データをロード</div>
+                    <p class="text-slate-400 mt-2 font-bold italic">PDF / JPG / PNG</p>
                 </label>
+                <div id="file-status" class="mt-4 text-[10px] font-black text-blue-500 uppercase tracking-widest"></div>
             </div>
-            <div id="file-list" class="mt-4 text-center text-sm font-bold text-blue-600 animate-pulse"></div>
         </section>
 
-        <!-- Step 2: Settings & Canvas -->
-        <section id="step-2" class="hidden border-t no-print">
-            <div class="flex bg-slate-100 p-2 gap-2 overflow-x-auto scrollbar-hide" id="question-tabs"></div>
-
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 p-4">
-                <!-- Control Panel -->
-                <div class="md:col-span-1 space-y-4">
-                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200 shadow-sm">
-                        <div class="mb-4">
-                            <label class="block text-xs font-black text-slate-400 uppercase mb-1">設問設定</label>
-                            <div class="grid grid-cols-2 gap-2">
-                                <input type="text" id="q-label" class="border-2 p-3 rounded-xl font-bold text-lg focus:border-blue-500 outline-none" placeholder="問1">
-                                <input type="number" id="q-max" class="border-2 p-3 rounded-xl font-bold text-lg focus:border-blue-500 outline-none" placeholder="配点">
-                            </div>
+        <!-- Step 2: Settings -->
+        <section id="step-2" class="hidden flex flex-col flex-grow overflow-hidden">
+            <div class="flex bg-slate-800 p-1 gap-1 overflow-x-auto shrink-0 shadow-xl" id="question-tabs"></div>
+            
+            <div class="flex flex-grow overflow-hidden">
+                <div class="w-64 bg-white border-r p-4 overflow-y-auto shrink-0 space-y-4 shadow-lg z-10">
+                    <div class="bg-slate-50 p-4 rounded-2xl border-2 border-slate-100">
+                        <label class="text-[10px] font-black text-slate-400 uppercase">Question Data</label>
+                        <div class="flex gap-1 mt-1">
+                            <input type="text" id="q-label" placeholder="問1" class="w-2/3 border-2 p-2 rounded-lg font-bold text-sm outline-none focus:border-blue-400" oninput="saveCurrentSettings()">
+                            <input type="number" id="q-max" placeholder="10" class="w-1/3 border-2 p-2 rounded-lg font-bold text-sm outline-none focus:border-blue-400" oninput="saveCurrentSettings()">
                         </div>
-                        <div>
-                            <label class="block text-xs font-black text-slate-400 uppercase mb-1">大問グループ番号</label>
-                            <input type="number" id="q-group" class="w-full border-2 p-3 rounded-xl font-bold text-lg focus:border-blue-500 outline-none" value="1">
-                        </div>
+                        <label class="text-[10px] font-black text-slate-400 block mt-4 uppercase">Group No.</label>
+                        <input type="number" id="q-group" class="w-full border-2 p-2 rounded-lg font-bold text-sm outline-none focus:border-blue-400" oninput="saveCurrentSettings()">
                     </div>
 
-                    <div class="grid grid-cols-1 gap-3">
-                        <button id="mode-range" class="mode-btn active p-4 rounded-2xl font-bold text-left flex items-center justify-between bg-white btn-shadow">
-                            <span>① 範囲を2点タップ</span>
-                            <span class="text-xs opacity-50">左上→右下</span>
-                        </button>
-                        <button id="mode-total-pos" class="mode-btn p-4 rounded-2xl font-bold text-left bg-white btn-shadow">
-                            ② 合計点の位置をタップ
-                        </button>
-                        <button id="mode-group-pos" class="mode-btn p-4 rounded-2xl font-bold text-left bg-white btn-shadow">
-                            ③ 大問計の位置をタップ
-                        </button>
+                    <div class="space-y-2 pt-2">
+                        <button id="mode-range" class="mode-btn w-full py-4 rounded-xl font-black text-xs bg-slate-100 border-2 text-slate-500 transition-all shadow-sm">① 設問範囲を指定</button>
+                        <button id="mode-group-pos" class="mode-btn w-full py-4 rounded-xl font-black text-xs bg-slate-100 border-2 text-slate-500 transition-all shadow-sm">② 大問計の位置</button>
+                        <button id="mode-total-pos" class="mode-btn w-full py-4 rounded-xl font-black text-xs bg-slate-100 border-2 text-slate-500 transition-all shadow-sm">③ 総計の位置</button>
                     </div>
-                    
-                    <button id="btn-save-q" class="w-full bg-blue-600 text-white p-5 rounded-2xl font-bold text-lg shadow-xl hover:bg-blue-700 transition-all">
-                        設定を完了して採点へ
-                    </button>
+
+                    <button id="go-to-scoring" class="w-full bg-blue-600 text-white p-5 rounded-2xl font-black shadow-xl hover:bg-blue-700 mt-6 transition-all active:scale-95">採点を開始 ➔</button>
+                    <p class="text-[9px] text-slate-400 text-center font-bold mt-4 uppercase tracking-tighter leading-tight">Right click to remove icons</p>
                 </div>
 
-                <!-- Canvas Area -->
-                <div class="md:col-span-3">
-                    <div class="relative inline-block border-4 border-slate-300 rounded-xl shadow-inner bg-slate-200 overflow-auto max-w-full" style="max-height: 75vh;">
+                <div class="flex-grow relative bg-slate-400 shadow-inner">
+                    <div id="canvas-container">
                         <canvas id="base-canvas"></canvas>
-                        <canvas id="selection-canvas" class="absolute top-0 left-0"></canvas>
+                        <canvas id="selection-canvas"></canvas>
                     </div>
-                    <p class="text-xs text-slate-500 mt-2 font-bold">※【範囲指定】は1点目（左上）と2点目（右下）を順番にタップしてください</p>
                 </div>
             </div>
         </section>
 
         <!-- Step 3: Scoring -->
-        <section id="step-3" class="hidden border-t">
-            <div class="bg-slate-800 text-white p-4 flex justify-between items-center no-print sticky top-0 z-20 shadow-lg">
-                <span id="active-q-title" class="text-lg font-bold bg-blue-600 px-4 py-1 rounded-full">採点中: 問1</span>
-                <button onclick="exportGradedPDFs()" class="bg-emerald-500 hover:bg-emerald-600 px-6 py-2 rounded-xl font-bold btn-shadow transition-colors">
-                    採点済みPDFを一括保存
+        <section id="step-3" class="hidden flex flex-col flex-grow overflow-hidden bg-slate-200">
+            <div class="bg-white p-3 px-6 flex justify-between items-center shadow-md shrink-0 z-20">
+                <div class="flex items-center gap-6">
+                    <button onclick="backToSettings()" class="text-xs bg-slate-100 px-4 py-2 rounded-lg font-black text-slate-500 border hover:bg-slate-200 transition-all">← CONFIG</button>
+                    <h2 id="active-q-display" class="font-black text-xl text-blue-600 italic tracking-tighter">SCORING</h2>
+                </div>
+                <button onclick="exportGradedPDFs()" class="bg-emerald-500 text-white px-8 py-3 rounded-xl font-black shadow-lg hover:bg-emerald-600 transition-all active:scale-95">採点済みを一括保存</button>
+            </div>
+            
+            <div id="scoring-list" class="flex-grow overflow-y-auto p-4 space-y-4"></div>
+
+            <div class="bg-slate-900 p-5 shadow-2xl shrink-0 flex justify-center border-t border-slate-700">
+                <button onclick="nextQuestion()" class="bg-blue-500 text-white px-16 py-4 rounded-2xl font-black shadow-xl hover:bg-blue-400 transition-all active:scale-95 text-lg italic">
+                    CONFIRM & NEXT QUESTION ➔
                 </button>
             </div>
-            <div id="scoring-area" class="bg-slate-50"></div>
         </section>
     </div>
 
@@ -111,310 +124,363 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         const { jsPDF } = window.jspdf;
 
-        const baseCanvas = document.getElementById('base-canvas');
-        const selectionCanvas = document.getElementById('selection-canvas');
-        const scoringArea = document.getElementById('scoring-area');
-        
         let students = [];
         let questions = [];
         let activeQIdx = -1;
         let globalTotalPos = null;
-        let groupTotalPos = {};
+        let groupTotalPos = {}; 
         
+        let zoom = 1.0;
+        let offsetX = 0;
+        let offsetY = 0;
+        let isDragging = false;
+        let lastTouch = null;
         let currentMode = 'range';
-        let tapCount = 0;
-        let p1 = null; // {x, y}
+        let p1 = null;
+        let pendingFiles = [];
 
-        // UI Mode Selection
-        document.getElementById('mode-range').onclick = () => setMode('range');
-        document.getElementById('mode-total-pos').onclick = () => setMode('total');
-        document.getElementById('mode-group-pos').onclick = () => setMode('group');
+        const container = document.getElementById('canvas-container');
+        const bCanvas = document.getElementById('base-canvas');
+        const sCanvas = document.getElementById('selection-canvas');
 
-        function setMode(mode) {
-            currentMode = mode;
-            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-            const btnId = mode === 'range' ? 'mode-range' : (mode === 'total' ? 'mode-total-pos' : 'mode-group-pos');
-            document.getElementById(btnId).classList.add('active');
-            tapCount = 0; p1 = null;
-            drawEverything();
-        }
-
-        // File Loading
-        document.getElementById('file-input').onchange = async (e) => {
-            const files = Array.from(e.target.files);
-            if (files.length === 0) return;
-            document.getElementById('file-list').innerText = "答案をスキャン中...";
-            students = [];
-
-            for (const file of files) {
-                const canvas = document.createElement('canvas');
-                if (file.type === 'application/pdf') {
-                    const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-                    const page = await pdf.getPage(1);
-                    const viewport = page.getViewport({ scale: 2.0 }); // 高解像度で取り込み
-                    canvas.width = viewport.width; canvas.height = viewport.height;
-                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-                } else {
-                    const img = await new Promise(r => {
-                        const reader = new FileReader();
-                        reader.onload = e => { const i = new Image(); i.onload = () => r(i); i.src = e.target.result; };
-                        reader.readAsDataURL(file);
-                    });
-                    canvas.width = img.width; canvas.height = img.height;
-                    canvas.getContext('2d').drawImage(img, 0, 0);
-                }
-                students.push({ name: file.name, canvas: canvas, scores: {} });
-            }
-            document.getElementById('file-list').innerText = `✅ ${students.length}名の答案を準備しました`;
-            document.getElementById('step-2').classList.remove('hidden');
-            if(questions.length === 0) addQuestion();
-            refreshCanvasSize();
+        // --- PDF Processing (Correction for positioning) ---
+        document.getElementById('file-input').onchange = (e) => {
+            pendingFiles = Array.from(e.target.files);
+            if (!pendingFiles.length) return;
+            if (pendingFiles.length > 1) processFiles(1);
+            else document.getElementById('page-modal').style.display = 'flex';
         };
 
+        document.getElementById('confirm-pages').onclick = () => {
+            const pps = parseInt(document.getElementById('pages-per-student').value) || 1;
+            document.getElementById('page-modal').style.display = 'none';
+            processFiles(pps);
+        };
+
+        async function processFiles(pagesPerStudent) {
+            const status = document.getElementById('file-status');
+            status.innerText = "Processing Assets...";
+            students = [];
+
+            for (const file of pendingFiles) {
+                if (file.type === 'application/pdf') {
+                    const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+                    if (pendingFiles.length === 1 && pdf.numPages > pagesPerStudent) {
+                        for (let sIdx = 0; sIdx < Math.ceil(pdf.numPages / pagesPerStudent); sIdx++) {
+                            const studentCanvas = await renderPagesToCanvas(pdf, sIdx * pagesPerStudent + 1, (sIdx + 1) * pagesPerStudent);
+                            students.push({ name: `生徒${String(sIdx + 1).padStart(2, '0')}`, canvas: studentCanvas, scores: {} });
+                        }
+                    } else {
+                        const studentCanvas = await renderPagesToCanvas(pdf, 1, pdf.numPages);
+                        students.push({ name: file.name, canvas: studentCanvas, scores: {} });
+                    }
+                } else {
+                    const img = await loadImage(file);
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width; canvas.height = img.height;
+                    canvas.getContext('2d').drawImage(img, 0, 0);
+                    students.push({ name: file.name, canvas, scores: {} });
+                }
+            }
+            
+            document.getElementById('step-1').classList.add('hidden');
+            document.getElementById('step-2').classList.remove('hidden');
+            if(!questions.length) addQuestion();
+            initCanvas();
+        }
+
+        async function renderPagesToCanvas(pdf, startPage, endPage) {
+            const actualEnd = Math.min(endPage, pdf.numPages);
+            const pages = [];
+            let totalH = 0; let maxW = 0;
+            for (let p = startPage; p <= actualEnd; p++) {
+                const page = await pdf.getPage(p);
+                const vp = page.getViewport({ scale: 2.0 }); 
+                pages.push({ page, vp });
+                totalH += vp.height; maxW = Math.max(maxW, vp.width);
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = maxW; canvas.height = totalH;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "white"; ctx.fillRect(0,0,maxW,totalH); // 背景を白に固定
+            let currentY = 0;
+            for (const p of pages) {
+                const pc = document.createElement('canvas');
+                pc.width = p.vp.width; pc.height = p.vp.height;
+                await p.page.render({ canvasContext: pc.getContext('2d'), viewport: p.vp }).promise;
+                ctx.drawImage(pc, 0, currentY);
+                currentY += p.vp.height;
+            }
+            return canvas;
+        }
+
+        function loadImage(file) {
+            return new Promise(r => {
+                const reader = new FileReader();
+                reader.onload = e => { const i = new Image(); i.onload = () => r(i); i.src = e.target.result; };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // --- Settings Logic ---
         function addQuestion() {
             const q = { id: Date.now(), label: `問${questions.length + 1}`, max: 10, group: 1, rect: null };
             questions.push(q);
             activeQIdx = questions.length - 1;
-            updateUIFromActiveQ();
             renderTabs();
+            updateFormFromActive();
+            drawSelection();
         }
 
         function switchTab(idx) {
             activeQIdx = idx;
-            updateUIFromActiveQ();
             renderTabs();
-            drawEverything();
-            renderScoringArea();
+            updateFormFromActive();
+            drawSelection();
         }
 
-        function updateUIFromActiveQ() {
+        function updateFormFromActive() {
             const q = questions[activeQIdx];
             document.getElementById('q-label').value = q.label;
             document.getElementById('q-max').value = q.max;
             document.getElementById('q-group').value = q.group;
-            document.getElementById('active-q-title').innerText = `採点中: ${q.label}`;
+        }
+
+        function saveCurrentSettings() {
+            const q = questions[activeQIdx];
+            q.label = document.getElementById('q-label').value;
+            q.max = parseFloat(document.getElementById('q-max').value) || 0;
+            q.group = parseInt(document.getElementById('q-group').value) || 1;
+            renderTabs();
+            drawSelection();
         }
 
         function renderTabs() {
-            const container = document.getElementById('question-tabs');
-            container.innerHTML = questions.map((q, i) => `
-                <button onclick="switchTab(${i})" class="tab-btn min-w-[100px] px-6 py-3 rounded-xl font-bold border-2 transition-all ${i === activeQIdx ? 'active bg-blue-600 text-white' : 'bg-white text-slate-600 border-slate-200'}">
-                    ${q.label}
+            const html = questions.map((q, i) => `
+                <button onclick="switchTab(${i})" class="tab-btn px-5 py-3 rounded-t-xl font-black shrink-0 transition-all text-[10px] uppercase tracking-widest ${i === activeQIdx ? 'active bg-white text-blue-600' : 'bg-slate-700 text-slate-400'}">
+                    ${q.label || '?'}
                 </button>
-            `).join('') + `<button onclick="addQuestion()" class="min-w-[100px] px-6 py-3 rounded-xl bg-slate-200 border-2 border-dashed border-slate-400 text-slate-500 font-bold">+ 追加</button>`;
+            `).join('') + `<button onclick="addQuestion()" class="px-5 py-3 text-slate-400 font-black hover:text-white transition-all text-[10px]">+ ADD</button>`;
+            document.getElementById('question-tabs').innerHTML = html;
         }
 
-        function refreshCanvasSize() {
+        function nextQuestion() {
+            if (activeQIdx < questions.length - 1) {
+                switchTab(activeQIdx + 1);
+                document.getElementById('scoring-list').scrollTop = 0;
+                renderScoringList();
+            } else alert("全ての設問の採点が完了しました！一括保存してください。");
+        }
+
+        function initCanvas() {
             const first = students[0].canvas;
-            const displayScale = Math.min(1, (window.innerWidth * 0.9) / first.width);
-            baseCanvas.width = first.width; baseCanvas.height = first.height;
-            baseCanvas.getContext('2d').drawImage(first, 0, 0);
-            selectionCanvas.width = first.width; selectionCanvas.height = first.height;
-            
-            // スクロール位置をリセット
-            baseCanvas.parentElement.scrollLeft = 0;
-            baseCanvas.parentElement.scrollTop = 0;
-            drawEverything();
+            bCanvas.width = sCanvas.width = first.width;
+            bCanvas.height = sCanvas.height = first.height;
+            resetZoom();
         }
 
-        function drawEverything() {
-            const ctx = selectionCanvas.getContext('2d');
-            ctx.clearRect(0,0,selectionCanvas.width, selectionCanvas.height);
-            
-            // 範囲ガイド (2点タップ中)
-            if (currentMode === 'range' && p1) {
-                ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
-                ctx.beginPath(); ctx.arc(p1.x, p1.y, 10, 0, Math.PI*2); ctx.fill();
-                ctx.strokeStyle = '#3b82f6'; ctx.setLineDash([10, 5]);
-                ctx.strokeRect(p1.x, p1.y, 5, 5); // 起点マーク
+        function applyTransform() {
+            const transform = `translate(${offsetX}px, ${offsetY}px) scale(${zoom})`;
+            bCanvas.style.transform = sCanvas.style.transform = transform;
+            bCanvas.getContext('2d').drawImage(students[0].canvas, 0, 0);
+            drawSelection();
+        }
+
+        function resetZoom() {
+            zoom = (container.clientWidth * 0.95) / bCanvas.width;
+            offsetX = (container.clientWidth - bCanvas.width * zoom) / 2;
+            offsetY = 10;
+            applyTransform();
+        }
+
+        // --- Interaction ---
+        container.onmousedown = (e) => { 
+            if (e.button === 0) { isDragging = true; lastTouch = { x: e.clientX, y: e.clientY }; }
+        };
+        window.onmousemove = (e) => {
+            if (isDragging) {
+                offsetX += e.clientX - lastTouch.x;
+                offsetY += e.clientY - lastTouch.y;
+                lastTouch = { x: e.clientX, y: e.clientY };
+                applyTransform();
             }
+        };
+        window.onmouseup = (e) => {
+            if (isDragging && Math.hypot(e.clientX - lastTouch.x, e.clientY - lastTouch.y) < 5) {
+                handleCanvasClick(e.clientX, e.clientY);
+            }
+            isDragging = false;
+        };
 
-            // 保存済みの設問範囲
-            questions.forEach((q, i) => {
-                if(!q.rect) return;
-                ctx.setLineDash([]);
-                ctx.strokeStyle = i === activeQIdx ? '#3b82f6' : '#94a3b8';
-                ctx.lineWidth = i === activeQIdx ? 6 : 2;
-                ctx.strokeRect(q.rect.x, q.rect.y, q.rect.w, q.rect.h);
-                
-                ctx.fillStyle = i === activeQIdx ? '#3b82f6' : '#94a3b8';
-                ctx.font = "bold 24px sans-serif";
-                ctx.fillText(q.label, q.rect.x, q.rect.y - 10);
-            });
-
-            if(globalTotalPos) drawTargetIcon(ctx, globalTotalPos.x, globalTotalPos.y, "合計点", "#ef4444");
-            Object.keys(groupTotalPos).forEach(g => {
-                drawTargetIcon(ctx, groupTotalPos[g].x, groupTotalPos[g].y, `大問${g}計`, "#10b981");
-            });
-        }
-
-        function drawTargetIcon(ctx, x, y, label, color) {
-            ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.setLineDash([]);
-            ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI*2); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(x-30, y); ctx.lineTo(x+30, y); ctx.moveTo(x, y-30); ctx.lineTo(x, y+30); ctx.stroke();
-            ctx.fillStyle = color; ctx.font = "bold 24px sans-serif"; ctx.fillText(label, x + 35, y + 10);
-        }
-
-        selectionCanvas.onclick = (e) => {
-            const rect = selectionCanvas.getBoundingClientRect();
-            const scaleX = selectionCanvas.width / rect.width;
-            const scaleY = selectionCanvas.height / rect.height;
-            const x = (e.clientX - rect.left) * scaleX;
-            const y = (e.clientY - rect.top) * scaleY;
-
+        function handleCanvasClick(screenX, screenY) {
+            const rect = container.getBoundingClientRect();
+            const x = (screenX - rect.left - offsetX) / zoom;
+            const y = (screenY - rect.top - offsetY) / zoom;
             if (currentMode === 'range') {
-                if (!p1) {
-                    p1 = { x, y };
-                } else {
-                    questions[activeQIdx].rect = { 
-                        x: Math.min(p1.x, x), 
-                        y: Math.min(p1.y, y), 
-                        w: Math.abs(x - p1.x), 
-                        h: Math.abs(y - p1.y) 
-                    };
+                if (!p1) p1 = { x, y };
+                else {
+                    questions[activeQIdx].rect = { x: Math.min(p1.x, x), y: Math.min(p1.y, y), w: Math.abs(x - p1.x), h: Math.abs(y - p1.y) };
                     p1 = null;
                 }
-            } else if (currentMode === 'total') {
-                globalTotalPos = { x, y };
-            } else if (currentMode === 'group') {
-                const gNum = document.getElementById('q-group').value;
-                groupTotalPos[gNum] = { x, y };
-            }
-            drawEverything();
+            } else if (currentMode === 'total') globalTotalPos = { x, y };
+            else if (currentMode === 'group') groupTotalPos[document.getElementById('q-group').value] = { x, y };
+            drawSelection();
+        }
+
+        sCanvas.oncontextmenu = (e) => {
+            e.preventDefault();
+            const rect = container.getBoundingClientRect();
+            const x = (e.clientX - rect.left - offsetX) / zoom;
+            const y = (e.clientY - rect.top - offsetY) / zoom;
+            Object.keys(groupTotalPos).forEach(g => { if (Math.hypot(groupTotalPos[g].x - x, groupTotalPos[g].y - y) < 40) delete groupTotalPos[g]; });
+            if (globalTotalPos && Math.hypot(globalTotalPos.x - x, globalTotalPos.y - y) < 60) globalTotalPos = null;
+            drawSelection();
         };
 
-        document.getElementById('btn-save-q').onclick = () => {
-            const q = questions[activeQIdx];
-            q.label = document.getElementById('q-label').value || q.label;
-            q.max = parseFloat(document.getElementById('q-max').value) || 10;
-            q.group = parseInt(document.getElementById('q-group').value) || 1;
-            renderTabs();
-            renderScoringArea();
+        function drawSelection() {
+            const ctx = sCanvas.getContext('2d');
+            ctx.clearRect(0,0,sCanvas.width, sCanvas.height);
+            questions.forEach((q, i) => {
+                if (!q.rect) return;
+                ctx.strokeStyle = (i === activeQIdx) ? '#3b82f6' : 'rgba(148, 163, 184, 0.4)';
+                ctx.lineWidth = (i === activeQIdx) ? 8 : 4;
+                ctx.strokeRect(q.rect.x, q.rect.y, q.rect.w, q.rect.h);
+            });
+            if (p1) { ctx.fillStyle = 'rgba(59, 130, 246, 0.5)'; ctx.beginPath(); ctx.arc(p1.x, p1.y, 15, 0, Math.PI*2); ctx.fill(); }
+            if (globalTotalPos) drawIcon(ctx, globalTotalPos.x, globalTotalPos.y, "TOTAL", "#ef4444", 50);
+            Object.keys(groupTotalPos).forEach(g => drawIcon(ctx, groupTotalPos[g].x, groupTotalPos[g].y, `G${g}`, "#10b981", 35));
+        }
+
+        function drawIcon(ctx, x, y, label, color, r) {
+            ctx.strokeStyle = color; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.stroke();
+            ctx.fillStyle = color; ctx.font = "bold 24px sans-serif"; ctx.fillText(label, x + r + 5, y + 8);
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(mode === 'range' ? 'mode-range' : (mode === 'total' ? 'mode-total-pos' : 'mode-group-pos')).classList.add('active');
+            p1 = null; drawSelection();
+        }
+        document.getElementById('mode-range').onclick = () => setMode('range');
+        document.getElementById('mode-total-pos').onclick = () => setMode('total');
+        document.getElementById('mode-group-pos').onclick = () => setMode('group');
+
+        // --- Scoring UI (Precision Correction) ---
+        document.getElementById('go-to-scoring').onclick = () => {
+            if (activeQIdx === -1 || !questions[activeQIdx].rect) return alert("範囲を指定してください。");
+            document.getElementById('step-2').classList.add('hidden');
             document.getElementById('step-3').classList.remove('hidden');
-            window.scrollTo({ top: document.getElementById('step-3').offsetTop, behavior: 'smooth' });
+            document.getElementById('stats').classList.remove('hidden');
+            renderScoringList();
         };
 
-        function renderScoringArea() {
+        function backToSettings() { document.getElementById('step-3').classList.add('hidden'); document.getElementById('step-2').classList.remove('hidden'); }
+
+        function renderScoringList() {
             const q = questions[activeQIdx];
-            if (!q || !q.rect) return;
-            scoringArea.innerHTML = '';
+            document.getElementById('active-q-display').innerText = `${q.label} (Max: ${q.max})`;
+            const list = document.getElementById('scoring-list');
+            list.innerHTML = '';
 
-            students.forEach((student) => {
-                const row = document.createElement('div');
-                row.className = 'crop-item bg-white hover:bg-blue-50 transition-colors';
+            students.forEach((s) => {
+                const item = document.createElement('div');
+                item.className = 'scoring-item rounded-3xl shadow-sm flex flex-col md:flex-row gap-4 items-center p-4';
                 
-                const wrapper = document.createElement('div');
-                wrapper.className = 'canvas-wrapper rounded-lg overflow-hidden shadow-md';
-                const c = document.createElement('canvas');
-                // 画面表示用に少し縮小して表示
-                const displayW = Math.min(q.rect.w, window.innerWidth * 0.6);
-                const displayScale = displayW / q.rect.w;
-                c.width = q.rect.w * displayScale; c.height = q.rect.h * displayScale;
-                c.getContext('2d').drawImage(student.canvas, q.rect.x, q.rect.y, q.rect.w, q.rect.h, 0, 0, c.width, c.height);
-                wrapper.appendChild(c);
-
-                const overlay = document.createElement('canvas');
-                overlay.className = 'mark-overlay';
-                overlay.width = c.width; overlay.height = c.height;
-                wrapper.appendChild(overlay);
-
-                const side = document.createElement('div');
-                side.className = 'flex flex-col items-center gap-2 flex-1';
-                const savedScore = student.scores[q.id] || "";
+                const crop = document.createElement('canvas');
+                const displayH = 140; 
+                const scale = displayH / q.rect.h;
+                crop.width = q.rect.w * scale; crop.height = displayH;
+                const cctx = crop.getContext('2d');
+                cctx.fillStyle = "white"; cctx.fillRect(0,0,crop.width,crop.height);
                 
-                side.innerHTML = `
-                    <div class="text-[10px] font-black text-slate-400 truncate max-w-[100px]">${student.name}</div>
+                // クロップ描画の位置ズレを防止するため正確な座標を指定
+                cctx.drawImage(s.canvas, 
+                    q.rect.x, q.rect.y, q.rect.w, q.rect.h, 
+                    0, 0, crop.width, crop.height
+                );
+                
+                const canvasWrap = document.createElement('div');
+                canvasWrap.className = "border-2 border-slate-200 rounded-xl overflow-hidden shrink-0 shadow-inner bg-white";
+                canvasWrap.appendChild(crop);
+
+                const control = document.createElement('div');
+                control.className = 'flex items-center gap-4 bg-slate-50 p-3 px-6 rounded-2xl flex-grow justify-between w-full md:w-auto border border-slate-200';
+                control.innerHTML = `
+                    <div class="flex flex-col">
+                        <span class="text-[9px] font-black text-slate-400 uppercase tracking-widest">Student</span>
+                        <div class="text-sm font-black text-slate-700 truncate max-w-[120px]">${s.name}</div>
+                    </div>
                     <div class="flex items-center gap-2">
-                        <input type="number" value="${savedScore}" class="w-20 border-3 border-slate-200 rounded-xl p-3 text-center font-bold text-2xl focus:border-blue-500 outline-none">
-                        <span class="text-sm font-bold text-slate-400">/ ${q.max}</span>
+                        <input type="number" class="w-20 text-center text-4xl font-black border-b-4 border-blue-500 bg-transparent outline-none focus:text-blue-600 transition-colors" value="${s.scores[q.id] || ''}">
+                        <span class="text-xs font-black text-slate-300 italic">/ ${q.max}</span>
                     </div>
                 `;
-
-                const input = side.querySelector('input');
-                input.oninput = () => {
-                    student.scores[q.id] = input.value;
-                    drawMark(overlay, input.value, q.max);
-                    updateGlobalStats();
-                };
-
-                drawMark(overlay, savedScore, q.max);
-                row.appendChild(wrapper); row.appendChild(side);
-                scoringArea.appendChild(row);
+                const input = control.querySelector('input');
+                input.oninput = () => { s.scores[q.id] = input.value; updateGlobalStats(); };
+                
+                item.appendChild(canvasWrap); item.appendChild(control); list.appendChild(item);
             });
             updateGlobalStats();
         }
 
-        function drawMark(canvas, score, max, forExport = false) {
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (score === "" && !forExport) return;
-            const s = parseFloat(score || 0), m = parseFloat(max);
-            const scale = forExport ? 2.5 : 1;
-            ctx.lineWidth = 6 * scale; ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
-            ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
-            const cx = canvas.width/2, cy = canvas.height/2;
-
-            if (s >= m) {
-                ctx.beginPath(); ctx.arc(cx, cy, Math.min(cx, cy)*0.8, 0, Math.PI*2); ctx.stroke();
-            } else if (s <= 0) {
-                const r = 25 * scale;
-                ctx.beginPath(); ctx.moveTo(cx-r, cy-r); ctx.lineTo(cx+r, cy+r); ctx.moveTo(cx+r, cy-r); ctx.lineTo(cx-r, cy+r); ctx.stroke();
-            } else {
-                const r = Math.min(cx, cy, 40 * scale);
-                ctx.beginPath(); ctx.moveTo(cx, cy-r); ctx.lineTo(cx-r, cy+r); ctx.lineTo(cx+r, cy+r); ctx.closePath(); ctx.stroke();
-                ctx.font = `bold ${24*scale}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(s, cx, cy+r-(6*scale));
-            }
-        }
-
         function updateGlobalStats() {
-            let total = 0, count = 0;
-            const currentTotalMax = questions.reduce((a, b) => a + b.max, 0);
-            students.forEach(s => {
-                const sTotal = Object.values(s.scores).reduce((a, b) => a + (parseFloat(b) || 0), 0);
-                total += sTotal; count++;
-            });
-            document.getElementById('avg-score').innerText = (total / (count || 1)).toFixed(1);
-            document.getElementById('total-max-display').innerText = currentTotalMax;
+            let total = 0;
+            students.forEach(s => total += Object.values(s.scores).reduce((a, b) => a + (parseFloat(b) || 0), 0));
+            document.getElementById('avg-score').innerText = (total / (students.length || 1)).toFixed(1);
+            document.getElementById('total-max-display').innerText = questions.reduce((a, b) => a + b.max, 0);
         }
 
+        // --- Export (Final Alignment) ---
         async function exportGradedPDFs() {
-            const doc = new jsPDF('p', 'pt', [students[0].canvas.width, students[0].canvas.height]);
-            const totalMax = questions.reduce((a, b) => a + b.max, 0);
-
             for (let i = 0; i < students.length; i++) {
                 const s = students[i];
-                if (i > 0) doc.addPage([s.canvas.width, s.canvas.height]);
+                const doc = new jsPDF({
+                    orientation: s.canvas.width > s.canvas.height ? 'l' : 'p',
+                    unit: 'pt',
+                    format: [s.canvas.width, s.canvas.height]
+                });
+                
                 doc.addImage(s.canvas.toDataURL('image/jpeg', 0.8), 'JPEG', 0, 0, s.canvas.width, s.canvas.height);
-
-                // 各設問
+                
                 questions.forEach(q => {
-                    if (!q.rect) return;
-                    const temp = document.createElement('canvas');
-                    temp.width = q.rect.w; temp.height = q.rect.h;
-                    drawMark(temp, s.scores[q.id], q.max, true);
-                    doc.addImage(temp.toDataURL(), 'PNG', q.rect.x, q.rect.y, q.rect.w, q.rect.h);
+                    if (q.rect && s.scores[q.id] !== "" && s.scores[q.id] !== undefined) {
+                        drawMarkPDF(doc, s.scores[q.id], q.max, q.rect);
+                    }
                 });
 
-                // 大問計
-                const groups = [...new Set(questions.map(q => q.group))];
-                groups.forEach(g => {
-                    if(!groupTotalPos[g]) return;
-                    const gTotal = questions.filter(q => q.group === g).reduce((sum, q) => sum + (parseFloat(s.scores[q.id]) || 0), 0);
-                    doc.setDrawColor(255, 0, 0); doc.setLineWidth(4);
-                    doc.circle(groupTotalPos[g].x, groupTotalPos[g].y, 40);
-                    doc.setFontSize(30); doc.setTextColor(255, 0, 0);
-                    doc.text(`${gTotal}`, groupTotalPos[g].x, groupTotalPos[g].y + 10, {align: 'center'});
+                Object.keys(groupTotalPos).forEach(g => {
+                    const p = groupTotalPos[g];
+                    const gt = questions.filter(q => q.group == g).reduce((sum, q) => sum + (parseFloat(s.scores[q.id]) || 0), 0);
+                    doc.setDrawColor(255,0,0); doc.setLineWidth(4); doc.circle(p.x, p.y, 45);
+                    doc.setFontSize(32); doc.setTextColor(255,0,0); doc.text(`${gt}`, p.x, p.y + 12, {align:'center'});
                 });
 
-                // 総計
-                if(globalTotalPos) {
-                    const sTotal = Object.values(s.scores).reduce((a, b) => a + (parseFloat(b) || 0), 0);
-                    doc.setDrawColor(255, 0, 0); doc.setLineWidth(6);
-                    doc.circle(globalTotalPos.x, globalTotalPos.y, 60);
-                    doc.setFontSize(50); doc.text(`${sTotal}`, globalTotalPos.x, globalTotalPos.y + 18, {align: 'center'});
+                if (globalTotalPos) {
+                    const ts = Object.values(s.scores).reduce((a,b) => a + (parseFloat(b)||0), 0);
+                    doc.setDrawColor(255,0,0); doc.setLineWidth(6); doc.circle(globalTotalPos.x, globalTotalPos.y, 70);
+                    doc.setFontSize(50); doc.text(`${ts}`, globalTotalPos.x, globalTotalPos.y+18, {align:'center'});
                 }
+                
+                doc.save(`graded_${s.name}.pdf`);
             }
-            doc.save("graded_results.pdf");
+        }
+
+        function drawMarkPDF(doc, score, max, rect) {
+            const sc = parseFloat(score || 0), mx = parseFloat(max);
+            doc.setDrawColor(255, 0, 0); doc.setLineWidth(4);
+            const cx = rect.x + rect.w/2, cy = rect.y + rect.h/2;
+            const r = Math.min(rect.w, rect.h) * 0.45;
+
+            if (sc >= mx) {
+                doc.circle(cx, cy, r);
+            } else if (sc <= 0) {
+                const s = r * 0.7; doc.line(cx-s, cy-s, cx+s, cy+s); doc.line(cx+s, cy-s, cx-s, cy+s);
+            } else {
+                doc.line(cx, cy-r, cx-r, cy+r); doc.line(cx-r, cy+r, cx+r, cy+r); doc.line(cx+r, cy+r, cx, cy-r);
+                doc.setFontSize(r * 0.8); doc.setTextColor(255,0,0);
+                doc.text(`${sc}`, cx, cy + (r*0.4), {align: 'center'});
+            }
         }
     </script>
 </body>
