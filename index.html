@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PDF串刺し採点プロ (2点タップ指定版)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+        #selection-canvas { cursor: crosshair; touch-action: none; }
+        .crop-item { border-bottom: 2px solid #e2e8f0; display: flex; align-items: center; gap: 1rem; padding: 0.75rem; }
+        .canvas-wrapper { position: relative; border: 1px solid #cbd5e1; background: white; flex-shrink: 0; }
+        .mark-overlay { position: absolute; top: 0; left: 0; pointer-events: none; }
+        .tab-btn.active { background-color: #3b82f6; color: white; border-color: #2563eb; }
+        .mode-btn { transition: all 0.2s; border: 2px solid #e2e8f0; }
+        .mode-btn.active { background-color: #ef4444; color: white; border-color: #b91c1c; transform: scale(1.02); }
+        .btn-shadow { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen p-2 md:p-4">
+
+    <div class="max-w-6xl mx-auto bg-white shadow-2xl rounded-3xl overflow-hidden">
+        <header class="bg-slate-800 p-4 text-white flex justify-between items-center no-print">
+            <div>
+                <h1 class="text-xl font-bold">PDF串刺し採点プロ</h1>
+                <p class="text-[10px] opacity-70 font-bold tracking-widest">Cくん！タップ操作特化モデル</p>
+            </div>
+            <div class="text-right">
+                <div class="text-xs">クラス平均: <span id="avg-score" class="font-bold">0</span> / <span id="total-max-display">0</span></div>
+            </div>
+        </header>
+
+        <!-- Step 1: Upload -->
+        <section id="step-1" class="p-6 no-print">
+            <div class="border-4 border-dashed border-slate-200 rounded-3xl p-10 text-center bg-slate-50 hover:bg-white transition-all">
+                <input type="file" id="file-input" multiple accept="application/pdf,image/*" class="hidden">
+                <label for="file-input" class="cursor-pointer block">
+                    <div class="text-blue-500 text-5xl mb-4">📁</div>
+                    <div class="text-xl font-bold text-slate-700">生徒全員の答案PDFを選択</div>
+                    <p class="text-sm text-slate-400 mt-2">※1枚目のレイアウトを基準に設定します</p>
+                </label>
+            </div>
+            <div id="file-list" class="mt-4 text-center text-sm font-bold text-blue-600 animate-pulse"></div>
+        </section>
+
+        <!-- Step 2: Settings & Canvas -->
+        <section id="step-2" class="hidden border-t no-print">
+            <div class="flex bg-slate-100 p-2 gap-2 overflow-x-auto scrollbar-hide" id="question-tabs"></div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 p-4">
+                <!-- Control Panel -->
+                <div class="md:col-span-1 space-y-4">
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <div class="mb-4">
+                            <label class="block text-xs font-black text-slate-400 uppercase mb-1">設問設定</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input type="text" id="q-label" class="border-2 p-3 rounded-xl font-bold text-lg focus:border-blue-500 outline-none" placeholder="問1">
+                                <input type="number" id="q-max" class="border-2 p-3 rounded-xl font-bold text-lg focus:border-blue-500 outline-none" placeholder="配点">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-black text-slate-400 uppercase mb-1">大問グループ番号</label>
+                            <input type="number" id="q-group" class="w-full border-2 p-3 rounded-xl font-bold text-lg focus:border-blue-500 outline-none" value="1">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-3">
+                        <button id="mode-range" class="mode-btn active p-4 rounded-2xl font-bold text-left flex items-center justify-between bg-white btn-shadow">
+                            <span>① 範囲を2点タップ</span>
+                            <span class="text-xs opacity-50">左上→右下</span>
+                        </button>
+                        <button id="mode-total-pos" class="mode-btn p-4 rounded-2xl font-bold text-left bg-white btn-shadow">
+                            ② 合計点の位置をタップ
+                        </button>
+                        <button id="mode-group-pos" class="mode-btn p-4 rounded-2xl font-bold text-left bg-white btn-shadow">
+                            ③ 大問計の位置をタップ
+                        </button>
+                    </div>
+                    
+                    <button id="btn-save-q" class="w-full bg-blue-600 text-white p-5 rounded-2xl font-bold text-lg shadow-xl hover:bg-blue-700 transition-all">
+                        設定を完了して採点へ
+                    </button>
+                </div>
+
+                <!-- Canvas Area -->
+                <div class="md:col-span-3">
+                    <div class="relative inline-block border-4 border-slate-300 rounded-xl shadow-inner bg-slate-200 overflow-auto max-w-full" style="max-height: 75vh;">
+                        <canvas id="base-canvas"></canvas>
+                        <canvas id="selection-canvas" class="absolute top-0 left-0"></canvas>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2 font-bold">※【範囲指定】は1点目（左上）と2点目（右下）を順番にタップしてください</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Step 3: Scoring -->
+        <section id="step-3" class="hidden border-t">
+            <div class="bg-slate-800 text-white p-4 flex justify-between items-center no-print sticky top-0 z-20 shadow-lg">
+                <span id="active-q-title" class="text-lg font-bold bg-blue-600 px-4 py-1 rounded-full">採点中: 問1</span>
+                <button onclick="exportGradedPDFs()" class="bg-emerald-500 hover:bg-emerald-600 px-6 py-2 rounded-xl font-bold btn-shadow transition-colors">
+                    採点済みPDFを一括保存
+                </button>
+            </div>
+            <div id="scoring-area" class="bg-slate-50"></div>
+        </section>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        const { jsPDF } = window.jspdf;
+
+        const baseCanvas = document.getElementById('base-canvas');
+        const selectionCanvas = document.getElementById('selection-canvas');
+        const scoringArea = document.getElementById('scoring-area');
+        
+        let students = [];
+        let questions = [];
+        let activeQIdx = -1;
+        let globalTotalPos = null;
+        let groupTotalPos = {};
+        
+        let currentMode = 'range';
+        let tapCount = 0;
+        let p1 = null; // {x, y}
+
+        // UI Mode Selection
+        document.getElementById('mode-range').onclick = () => setMode('range');
+        document.getElementById('mode-total-pos').onclick = () => setMode('total');
+        document.getElementById('mode-group-pos').onclick = () => setMode('group');
+
+        function setMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            const btnId = mode === 'range' ? 'mode-range' : (mode === 'total' ? 'mode-total-pos' : 'mode-group-pos');
+            document.getElementById(btnId).classList.add('active');
+            tapCount = 0; p1 = null;
+            drawEverything();
+        }
+
+        // File Loading
+        document.getElementById('file-input').onchange = async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+            document.getElementById('file-list').innerText = "答案をスキャン中...";
+            students = [];
+
+            for (const file of files) {
+                const canvas = document.createElement('canvas');
+                if (file.type === 'application/pdf') {
+                    const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+                    const page = await pdf.getPage(1);
+                    const viewport = page.getViewport({ scale: 2.0 }); // 高解像度で取り込み
+                    canvas.width = viewport.width; canvas.height = viewport.height;
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                } else {
+                    const img = await new Promise(r => {
+                        const reader = new FileReader();
+                        reader.onload = e => { const i = new Image(); i.onload = () => r(i); i.src = e.target.result; };
+                        reader.readAsDataURL(file);
+                    });
+                    canvas.width = img.width; canvas.height = img.height;
+                    canvas.getContext('2d').drawImage(img, 0, 0);
+                }
+                students.push({ name: file.name, canvas: canvas, scores: {} });
+            }
+            document.getElementById('file-list').innerText = `✅ ${students.length}名の答案を準備しました`;
+            document.getElementById('step-2').classList.remove('hidden');
+            if(questions.length === 0) addQuestion();
+            refreshCanvasSize();
+        };
+
+        function addQuestion() {
+            const q = { id: Date.now(), label: `問${questions.length + 1}`, max: 10, group: 1, rect: null };
+            questions.push(q);
+            activeQIdx = questions.length - 1;
+            updateUIFromActiveQ();
+            renderTabs();
+        }
+
+        function switchTab(idx) {
+            activeQIdx = idx;
+            updateUIFromActiveQ();
+            renderTabs();
+            drawEverything();
+            renderScoringArea();
+        }
+
+        function updateUIFromActiveQ() {
+            const q = questions[activeQIdx];
+            document.getElementById('q-label').value = q.label;
+            document.getElementById('q-max').value = q.max;
+            document.getElementById('q-group').value = q.group;
+            document.getElementById('active-q-title').innerText = `採点中: ${q.label}`;
+        }
+
+        function renderTabs() {
+            const container = document.getElementById('question-tabs');
+            container.innerHTML = questions.map((q, i) => `
+                <button onclick="switchTab(${i})" class="tab-btn min-w-[100px] px-6 py-3 rounded-xl font-bold border-2 transition-all ${i === activeQIdx ? 'active bg-blue-600 text-white' : 'bg-white text-slate-600 border-slate-200'}">
+                    ${q.label}
+                </button>
+            `).join('') + `<button onclick="addQuestion()" class="min-w-[100px] px-6 py-3 rounded-xl bg-slate-200 border-2 border-dashed border-slate-400 text-slate-500 font-bold">+ 追加</button>`;
+        }
+
+        function refreshCanvasSize() {
+            const first = students[0].canvas;
+            const displayScale = Math.min(1, (window.innerWidth * 0.9) / first.width);
+            baseCanvas.width = first.width; baseCanvas.height = first.height;
+            baseCanvas.getContext('2d').drawImage(first, 0, 0);
+            selectionCanvas.width = first.width; selectionCanvas.height = first.height;
+            
+            // スクロール位置をリセット
+            baseCanvas.parentElement.scrollLeft = 0;
+            baseCanvas.parentElement.scrollTop = 0;
+            drawEverything();
+        }
+
+        function drawEverything() {
+            const ctx = selectionCanvas.getContext('2d');
+            ctx.clearRect(0,0,selectionCanvas.width, selectionCanvas.height);
+            
+            // 範囲ガイド (2点タップ中)
+            if (currentMode === 'range' && p1) {
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+                ctx.beginPath(); ctx.arc(p1.x, p1.y, 10, 0, Math.PI*2); ctx.fill();
+                ctx.strokeStyle = '#3b82f6'; ctx.setLineDash([10, 5]);
+                ctx.strokeRect(p1.x, p1.y, 5, 5); // 起点マーク
+            }
+
+            // 保存済みの設問範囲
+            questions.forEach((q, i) => {
+                if(!q.rect) return;
+                ctx.setLineDash([]);
+                ctx.strokeStyle = i === activeQIdx ? '#3b82f6' : '#94a3b8';
+                ctx.lineWidth = i === activeQIdx ? 6 : 2;
+                ctx.strokeRect(q.rect.x, q.rect.y, q.rect.w, q.rect.h);
+                
+                ctx.fillStyle = i === activeQIdx ? '#3b82f6' : '#94a3b8';
+                ctx.font = "bold 24px sans-serif";
+                ctx.fillText(q.label, q.rect.x, q.rect.y - 10);
+            });
+
+            if(globalTotalPos) drawTargetIcon(ctx, globalTotalPos.x, globalTotalPos.y, "合計点", "#ef4444");
+            Object.keys(groupTotalPos).forEach(g => {
+                drawTargetIcon(ctx, groupTotalPos[g].x, groupTotalPos[g].y, `大問${g}計`, "#10b981");
+            });
+        }
+
+        function drawTargetIcon(ctx, x, y, label, color) {
+            ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.setLineDash([]);
+            ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI*2); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x-30, y); ctx.lineTo(x+30, y); ctx.moveTo(x, y-30); ctx.lineTo(x, y+30); ctx.stroke();
+            ctx.fillStyle = color; ctx.font = "bold 24px sans-serif"; ctx.fillText(label, x + 35, y + 10);
+        }
+
+        selectionCanvas.onclick = (e) => {
+            const rect = selectionCanvas.getBoundingClientRect();
+            const scaleX = selectionCanvas.width / rect.width;
+            const scaleY = selectionCanvas.height / rect.height;
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+
+            if (currentMode === 'range') {
+                if (!p1) {
+                    p1 = { x, y };
+                } else {
+                    questions[activeQIdx].rect = { 
+                        x: Math.min(p1.x, x), 
+                        y: Math.min(p1.y, y), 
+                        w: Math.abs(x - p1.x), 
+                        h: Math.abs(y - p1.y) 
+                    };
+                    p1 = null;
+                }
+            } else if (currentMode === 'total') {
+                globalTotalPos = { x, y };
+            } else if (currentMode === 'group') {
+                const gNum = document.getElementById('q-group').value;
+                groupTotalPos[gNum] = { x, y };
+            }
+            drawEverything();
+        };
+
+        document.getElementById('btn-save-q').onclick = () => {
+            const q = questions[activeQIdx];
+            q.label = document.getElementById('q-label').value || q.label;
+            q.max = parseFloat(document.getElementById('q-max').value) || 10;
+            q.group = parseInt(document.getElementById('q-group').value) || 1;
+            renderTabs();
+            renderScoringArea();
+            document.getElementById('step-3').classList.remove('hidden');
+            window.scrollTo({ top: document.getElementById('step-3').offsetTop, behavior: 'smooth' });
+        };
+
+        function renderScoringArea() {
+            const q = questions[activeQIdx];
+            if (!q || !q.rect) return;
+            scoringArea.innerHTML = '';
+
+            students.forEach((student) => {
+                const row = document.createElement('div');
+                row.className = 'crop-item bg-white hover:bg-blue-50 transition-colors';
+                
+                const wrapper = document.createElement('div');
+                wrapper.className = 'canvas-wrapper rounded-lg overflow-hidden shadow-md';
+                const c = document.createElement('canvas');
+                // 画面表示用に少し縮小して表示
+                const displayW = Math.min(q.rect.w, window.innerWidth * 0.6);
+                const displayScale = displayW / q.rect.w;
+                c.width = q.rect.w * displayScale; c.height = q.rect.h * displayScale;
+                c.getContext('2d').drawImage(student.canvas, q.rect.x, q.rect.y, q.rect.w, q.rect.h, 0, 0, c.width, c.height);
+                wrapper.appendChild(c);
+
+                const overlay = document.createElement('canvas');
+                overlay.className = 'mark-overlay';
+                overlay.width = c.width; overlay.height = c.height;
+                wrapper.appendChild(overlay);
+
+                const side = document.createElement('div');
+                side.className = 'flex flex-col items-center gap-2 flex-1';
+                const savedScore = student.scores[q.id] || "";
+                
+                side.innerHTML = `
+                    <div class="text-[10px] font-black text-slate-400 truncate max-w-[100px]">${student.name}</div>
+                    <div class="flex items-center gap-2">
+                        <input type="number" value="${savedScore}" class="w-20 border-3 border-slate-200 rounded-xl p-3 text-center font-bold text-2xl focus:border-blue-500 outline-none">
+                        <span class="text-sm font-bold text-slate-400">/ ${q.max}</span>
+                    </div>
+                `;
+
+                const input = side.querySelector('input');
+                input.oninput = () => {
+                    student.scores[q.id] = input.value;
+                    drawMark(overlay, input.value, q.max);
+                    updateGlobalStats();
+                };
+
+                drawMark(overlay, savedScore, q.max);
+                row.appendChild(wrapper); row.appendChild(side);
+                scoringArea.appendChild(row);
+            });
+            updateGlobalStats();
+        }
+
+        function drawMark(canvas, score, max, forExport = false) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (score === "" && !forExport) return;
+            const s = parseFloat(score || 0), m = parseFloat(max);
+            const scale = forExport ? 2.5 : 1;
+            ctx.lineWidth = 6 * scale; ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+            const cx = canvas.width/2, cy = canvas.height/2;
+
+            if (s >= m) {
+                ctx.beginPath(); ctx.arc(cx, cy, Math.min(cx, cy)*0.8, 0, Math.PI*2); ctx.stroke();
+            } else if (s <= 0) {
+                const r = 25 * scale;
+                ctx.beginPath(); ctx.moveTo(cx-r, cy-r); ctx.lineTo(cx+r, cy+r); ctx.moveTo(cx+r, cy-r); ctx.lineTo(cx-r, cy+r); ctx.stroke();
+            } else {
+                const r = Math.min(cx, cy, 40 * scale);
+                ctx.beginPath(); ctx.moveTo(cx, cy-r); ctx.lineTo(cx-r, cy+r); ctx.lineTo(cx+r, cy+r); ctx.closePath(); ctx.stroke();
+                ctx.font = `bold ${24*scale}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText(s, cx, cy+r-(6*scale));
+            }
+        }
+
+        function updateGlobalStats() {
+            let total = 0, count = 0;
+            const currentTotalMax = questions.reduce((a, b) => a + b.max, 0);
+            students.forEach(s => {
+                const sTotal = Object.values(s.scores).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+                total += sTotal; count++;
+            });
+            document.getElementById('avg-score').innerText = (total / (count || 1)).toFixed(1);
+            document.getElementById('total-max-display').innerText = currentTotalMax;
+        }
+
+        async function exportGradedPDFs() {
+            const doc = new jsPDF('p', 'pt', [students[0].canvas.width, students[0].canvas.height]);
+            const totalMax = questions.reduce((a, b) => a + b.max, 0);
+
+            for (let i = 0; i < students.length; i++) {
+                const s = students[i];
+                if (i > 0) doc.addPage([s.canvas.width, s.canvas.height]);
+                doc.addImage(s.canvas.toDataURL('image/jpeg', 0.8), 'JPEG', 0, 0, s.canvas.width, s.canvas.height);
+
+                // 各設問
+                questions.forEach(q => {
+                    if (!q.rect) return;
+                    const temp = document.createElement('canvas');
+                    temp.width = q.rect.w; temp.height = q.rect.h;
+                    drawMark(temp, s.scores[q.id], q.max, true);
+                    doc.addImage(temp.toDataURL(), 'PNG', q.rect.x, q.rect.y, q.rect.w, q.rect.h);
+                });
+
+                // 大問計
+                const groups = [...new Set(questions.map(q => q.group))];
+                groups.forEach(g => {
+                    if(!groupTotalPos[g]) return;
+                    const gTotal = questions.filter(q => q.group === g).reduce((sum, q) => sum + (parseFloat(s.scores[q.id]) || 0), 0);
+                    doc.setDrawColor(255, 0, 0); doc.setLineWidth(4);
+                    doc.circle(groupTotalPos[g].x, groupTotalPos[g].y, 40);
+                    doc.setFontSize(30); doc.setTextColor(255, 0, 0);
+                    doc.text(`${gTotal}`, groupTotalPos[g].x, groupTotalPos[g].y + 10, {align: 'center'});
+                });
+
+                // 総計
+                if(globalTotalPos) {
+                    const sTotal = Object.values(s.scores).reduce((a, b) => a + (parseFloat(b) || 0), 0);
+                    doc.setDrawColor(255, 0, 0); doc.setLineWidth(6);
+                    doc.circle(globalTotalPos.x, globalTotalPos.y, 60);
+                    doc.setFontSize(50); doc.text(`${sTotal}`, globalTotalPos.x, globalTotalPos.y + 18, {align: 'center'});
+                }
+            }
+            doc.save("graded_results.pdf");
+        }
+    </script>
+</body>
+</html>
