@@ -126,17 +126,17 @@
                     SCORER <span class="text-slate-400 font-medium text-[10px] ml-1 tracking-normal">v1.9.8</span>
                 </h1>
             </div>
-            <!-- クラウド同期・保存用UI（ヘッダー右側） -->
-            <div class="flex items-center gap-3">
-                <button onclick="openCloudModal()" class="bg-emerald-600 text-white px-4 py-1.5 rounded-xl font-bold text-xs hover:bg-emerald-700 transition-all shadow-sm">
+            <!-- クラウド同期・保存用UI（右側に集約） -->
+            <div class="flex items-center gap-4">
+                <div id="stats-summary" class="hidden flex items-center gap-6">
+                    <div class="text-right">
+                        <span class="text-[10px] text-slate-400 block font-bold">全体平均点</span>
+                        <span id="total-avg" class="text-blue-600 font-black text-xl">0.0</span> <span class="text-slate-400 text-sm">/ <span id="total-max">0</span></span>
+                    </div>
+                </div>
+                <button onclick="openCloudModal()" class="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-emerald-700 transition-all shadow-sm cursor-pointer z-40">
                     ☁️ クラウド保存 / 読み込み
                 </button>
-            </div>
-            <div id="stats-summary" class="hidden flex items-center gap-6">
-                <div class="text-right">
-                    <span class="text-[10px] text-slate-400 block font-bold">全体平均点</span>
-                    <span id="total-avg" class="text-blue-600 font-black text-xl">0.0</span> <span class="text-slate-400 text-sm">/ <span id="total-max">0</span></span>
-                </div>
             </div>
         </header>
 
@@ -175,7 +175,7 @@
                     </div>
                 </div>
             </div>
-        </section>
+        </div>
 
         <!-- Supabase Cloud Modal (カメラ枠付きQRスキャン機能追加) -->
         <div id="cloud-modal" class="modal-overlay hidden">
