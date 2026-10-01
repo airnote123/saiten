@@ -10,6 +10,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- Supabase JS Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- QRコード読み取り (jsQR) & 生成 (QRCode.js) -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
         body { touch-action: none; -webkit-user-select: none; user-select: none; overflow: hidden; }
         #canvas-container { 
@@ -113,7 +116,7 @@
                     SCORER <span class="text-slate-400 font-medium text-[10px] ml-1 tracking-normal">v1.9.8</span>
                 </h1>
             </div>
-            <!-- クラウド同期・保存用UI（ヘッダー右側に追加） -->
+            <!-- クラウド同期・保存用UI（ヘッダー右側） -->
             <div class="flex items-center gap-3">
                 <button onclick="openCloudModal()" class="bg-emerald-600 text-white px-4 py-1.5 rounded-xl font-bold text-xs hover:bg-emerald-700 transition-all shadow-sm">
                     ☁️ クラウド保存 / 読み込み
@@ -164,26 +167,48 @@
             </div>
         </div>
 
-        <!-- Supabase Cloud Modal (新規追加) -->
+        <!-- Supabase Cloud Modal (QR読み込み/出力機能追加) -->
         <div id="cloud-modal" class="modal-overlay hidden">
-            <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4 space-y-6">
-                <div class="flex justify-between items-center">
+            <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full mx-4 space-y-6 max-h-[90vh] overflow-y-auto">
+                <div class="flex justify-between items-center border-b pb-3">
                     <h3 class="text-xl font-black text-slate-800">クラウドデータ管理</h3>
                     <button onclick="closeCloudModal()" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
                 </div>
+
+                <!-- QR読み込みエリア -->
+                <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                    <label class="font-bold text-xs text-slate-600 block">📷 QRコードから設定を読み込む</label>
+                    <input type="file" id="qr-file-input" accept="image/*" class="hidden" onchange="scanQrCodeImage(this)">
+                    <button onclick="document.getElementById('qr-file-input').click()" class="w-full bg-slate-800 text-white py-2 rounded-xl text-xs font-bold hover:bg-slate-700 transition-all">
+                        QR画像を選択して自動入力
+                    </button>
+                </div>
+
                 <div class="space-y-4 text-sm">
                     <div>
-                        <label class="font-bold text-xs text-slate-500 block mb-1">カスタムID（変更可能・URL識別用）</label>
-                        <input type="text" id="cloud-custom-id" placeholder="例: math-test-01" class="w-full border-2 border-slate-200 p-2.5 rounded-xl font-bold outline-none focus:border-blue-500">
+                        <label class="font-bold text-xs text-slate-500 block mb-1">カスタムID (A)</label>
+                        <input type="text" id="cloud-custom-id" placeholder="例: math-test-01" class="w-full border-2 border-slate-200 p-2.5 rounded-xl font-bold outline-none focus:border-blue-500" oninput="updatePdfUrlFromCustomId()">
                     </div>
                     <div>
-                        <label class="font-bold text-xs text-slate-500 block mb-1">パスワード</label>
+                        <label class="font-bold text-xs text-slate-500 block mb-1">パスワード (B)</label>
                         <input type="password" id="cloud-password" placeholder="パスワードを入力" class="w-full border-2 border-slate-200 p-2.5 rounded-xl font-bold outline-none focus:border-blue-500">
                     </div>
                     <div>
-                        <label class="font-bold text-xs text-slate-500 block mb-1">PDFのURL一覧（改行またはカンマ区切り）</label>
-                        <textarea id="cloud-pdf-urls" rows="3" placeholder="https://.../pdf1.pdf&#10;https://.../pdf2.pdf" class="w-full border-2 border-slate-200 p-2.5 rounded-xl font-medium outline-none focus:border-blue-500 text-xs"></textarea>
+                        <label class="font-bold text-xs text-slate-500 block mb-1">PDFのURL一覧</label>
+                        <textarea id="cloud-pdf-urls" rows="3" placeholder="https://..." class="w-full border-2 border-slate-200 p-2.5 rounded-xl font-medium outline-none focus:border-blue-500 text-xs"></textarea>
                     </div>
+
+                    <!-- QR生成機能 -->
+                    <div class="pt-2 border-t border-slate-100 flex flex-col items-center gap-2">
+                        <button onclick="generateSettingQrCode()" class="text-xs font-bold text-blue-600 hover:underline">
+                            現在のID/パスワードからQRコードを生成
+                        </button>
+                        <div id="qr-output-box" class="hidden text-center pt-2">
+                            <div id="qr-code-display" class="inline-block p-2 bg-white border border-slate-200 rounded-xl"></div>
+                            <p class="text-[10px] text-slate-400 mt-1">「カスタムID,パスワード」が書き込まれています</p>
+                        </div>
+                    </div>
+
                     <div class="flex gap-3 pt-2">
                         <button onclick="cloudSaveData()" class="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all shadow-md">
                             クラウドに保存
@@ -279,9 +304,8 @@
         const { jsPDF } = window.jspdf;
 
         // ==========================================
-        // Supabase 設定 (ご自身のプロジェクト情報に書き換えてください)
+        // Supabase 設定
         // ==========================================
-       // 正しいご自身のプロジェクトURLと新しいPublishable Keyを設定する
         const SUPABASE_URL = 'https://qfzyrogwyjbzbblnvqzy.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_tXLLvKe_L-27OsGU-GH3Zw_176oxBqw';
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -314,6 +338,93 @@
         // Cloud Modal Controls
         function openCloudModal() { document.getElementById('cloud-modal').classList.remove('hidden'); }
         function closeCloudModal() { document.getElementById('cloud-modal').classList.add('hidden'); }
+
+        // --- 追加: QRコード解析と出力ロジック ---
+        function updatePdfUrlFromCustomId() {
+            const val = document.getElementById('cloud-custom-id').value.trim();
+            if (val) {
+                document.getElementById('cloud-pdf-urls').value = `https://qfzyrogwyjbzbblnvqzy.supabase.co/storage/v1/object/public/benkyo/${val}.pdf`;
+            }
+        }
+
+        async function scanQrCodeImage(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            try {
+                const img = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => {
+                        const i = new Image();
+                        i.onload = () => resolve(i);
+                        i.onerror = reject;
+                        i.src = e.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                });
+
+                const cvs = document.createElement('canvas');
+                const ctx = cvs.getContext('2d');
+                cvs.width = img.width;
+                cvs.height = img.height;
+                ctx.drawImage(img, 0, 0);
+
+                const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height);
+                const code = jsQR(imgData.data, imgData.width, imgData.height);
+
+                if (!code) {
+                    alert("QRコードを検出できませんでした。");
+                    return;
+                }
+
+                const rawText = code.data.trim();
+                const parts = rawText.split(',');
+
+                if (parts.length < 2) {
+                    alert("QRコードのフォーマットが正しくありません (A,B のカンマ区切りである必要があります)");
+                    return;
+                }
+
+                const customId = parts[0].trim();
+                const password = parts[1].trim();
+
+                document.getElementById('cloud-custom-id').value = customId;
+                document.getElementById('cloud-password').value = password;
+                document.getElementById('cloud-pdf-urls').value = `https://qfzyrogwyjbzbblnvqzy.supabase.co/storage/v1/object/public/benkyo/${customId}.pdf`;
+
+                alert(`QRコードの設定を読み込みました！\nカスタムID: ${customId}`);
+
+            } catch (e) {
+                console.error(e);
+                alert("QRコード処理中にエラーが発生しました");
+            } finally {
+                input.value = '';
+            }
+        }
+
+        function generateSettingQrCode() {
+            const customId = document.getElementById('cloud-custom-id').value.trim();
+            const password = document.getElementById('cloud-password').value.trim();
+
+            if (!customId || !password) {
+                alert("QRコードを作成するには、カスタムIDとパスワードの両方を入力してください。");
+                return;
+            }
+
+            const qrDisplay = document.getElementById('qr-code-display');
+            qrDisplay.innerHTML = '';
+
+            new QRCode(qrDisplay, {
+                text: `${customId},${password}`,
+                width: 140,
+                height: 140,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+
+            document.getElementById('qr-output-box').classList.remove('hidden');
+        }
 
         // Cloud Save / Load Logic
         async function cloudSaveData() {
@@ -392,7 +503,6 @@
             if (data.pdf_urls) {
                 const urls = data.pdf_urls.split(/[\n,]/).map(u => u.trim()).filter(u => u);
                 if (urls.length > 0) {
-                    btnText = document.getElementById('export-btn'); // 簡易ローディング表示の代わり
                     alert(`${urls.length}件のPDFをURLから読み込みます。OKを押して少々お待ちください。`);
                     
                     students = [];
@@ -717,7 +827,7 @@
         function prevQuestion() { if (activeQIdx > 0) { activeQIdx--; renderScoringList(); } }
         function backToSettings() { document.getElementById('step-3').classList.add('hidden'); document.getElementById('step-2').classList.remove('hidden'); drawSelection(); }
 
-        // PDF Export with Multi-Page Support (横向き対応維持)
+        // PDF Export with Multi-Page Support
         async function exportGradedPDFs() {
             const btn = document.getElementById('export-btn');
             btn.innerText = "生成中..."; btn.disabled = true;
