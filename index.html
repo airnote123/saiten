@@ -955,7 +955,7 @@
                     doc.addPage([page.width, page.height], pageOrientation);
                 }
                 doc.setPage(i + 1);
-                doc.addImage(page.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, page.width, page.height);
+                doc.addImage(page.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, page.width, page.height);
             }
             doc.save(`${s.name}_採点前.pdf`);
         }
@@ -974,7 +974,7 @@
                     doc.addPage([page.width, page.height], pageOrientation);
                 }
                 doc.setPage(i + 1);
-                doc.addImage(page.toDataURL('image/jpeg', 0.75), 'JPEG', 0, 0, page.width, page.height);
+                doc.addImage(page.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, page.width, page.height);
                 
                 questions.forEach(q => { 
                     if (q.rect && q.rect.pageIdx === i && s.scores[q.id] !== undefined && s.scores[q.id] !== "") {
@@ -1016,7 +1016,7 @@
                             doc.addPage([page.width, page.height], pageOrientation);
                         }
                         doc.setPage(i + 1);
-                        doc.addImage(page.toDataURL('image/jpeg', 0.75), 'JPEG', 0, 0, page.width, page.height);
+                        doc.addImage(page.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, page.width, page.height);
                         
                         questions.forEach(q => { 
                             if (q.rect && q.rect.pageIdx === i && s.scores[q.id] !== undefined && s.scores[q.id] !== "") {
