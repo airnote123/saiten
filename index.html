@@ -878,10 +878,10 @@
                 const py = getPageOffset(q.rect.pageIdx);
                 ctx.strokeStyle = (i === activeQIdx && currentSettingMode === 'question') ? '#3b82f6' : 'rgba(148, 163, 184, 0.5)';
                 ctx.setLineDash((i === activeQIdx && currentSettingMode === 'question') ? [] : [5, 5]);
-                ctx.lineWidth = 4/zoom; ctx.strokeRect(q.rect.x, q.rect.y + py, q.rect.w, q.rect.h);
+                ctx.lineWidth = 8/zoom; ctx.strokeRect(q.rect.x, q.rect.y + py, q.rect.w, q.rect.h);
             });
-            if (totalScoreRect) { const py = getPageOffset(totalScoreRect.pageIdx); ctx.strokeStyle = '#f59e0b'; ctx.setLineDash([]); ctx.lineWidth = 5/zoom; ctx.strokeRect(totalScoreRect.x, totalScoreRect.y + py, totalScoreRect.w, totalScoreRect.h); }
-            Object.keys(groupScoreRects).forEach(gid => { const r = groupScoreRects[gid]; const py = getPageOffset(r.pageIdx); ctx.strokeStyle = '#10b981'; ctx.setLineDash([]); ctx.lineWidth = 5/zoom; ctx.strokeRect(r.x, r.y + py, r.w, r.h); });
+            if (totalScoreRect) { const py = getPageOffset(totalScoreRect.pageIdx); ctx.strokeStyle = '#f59e0b'; ctx.setLineDash([]); ctx.lineWidth = 10/zoom; ctx.strokeRect(totalScoreRect.x, totalScoreRect.y + py, totalScoreRect.w, totalScoreRect.h); }
+            Object.keys(groupScoreRects).forEach(gid => { const r = groupScoreRects[gid]; const py = getPageOffset(r.pageIdx); ctx.strokeStyle = '#10b981'; ctx.setLineDash([]); ctx.lineWidth = 10/zoom; ctx.strokeRect(r.x, r.y + py, r.w, r.h); });
             if (selectionStart) { ctx.fillStyle = '#3b82f6'; ctx.beginPath(); ctx.arc(selectionStart.x, selectionStart.y, 10/zoom, 0, Math.PI*2); ctx.fill(); }
         }
 
