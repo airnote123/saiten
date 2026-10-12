@@ -1047,7 +1047,7 @@
 
         function drawMarkPDF(doc, score, max, rect) {
             const sc = parseFloat(score || 0), mx = parseFloat(max);
-            doc.setDrawColor(255, 0, 0); doc.setLineWidth(3);
+            doc.setDrawColor(255, 0, 0); doc.setLineWidth(6);
             const cx = rect.x + rect.w/2, cy = rect.y + rect.h/2, r = Math.min(rect.w, rect.h) * 0.45;
             if (sc >= mx) doc.circle(cx, cy, r);
             else if (sc <= 0) { doc.line(cx - r/2, cy, cx - r/4, cy + r/2); doc.line(cx - r/4, cy + r/2, cx + r/2, cy - r/2); }
@@ -1058,7 +1058,7 @@
         }
 
         function drawTotalMarkPDF(doc, score, rect) { 
-            doc.setDrawColor(255, 0, 0); doc.setLineWidth(4); doc.rect(rect.x, rect.y, rect.w, rect.h); 
+            doc.setDrawColor(255, 0, 0); doc.setLineWidth(8); doc.rect(rect.x, rect.y, rect.w, rect.h); 
             const fs = Math.min(rect.w, rect.h) * 0.7; 
             doc.setFontSize(fs); doc.setTextColor(255,0,0); 
             doc.text(`${score}`, rect.x + rect.w/2, rect.y + rect.h/2 + fs/3, {align: 'center'}); 
