@@ -59,7 +59,7 @@
             transform: none !important;
         }
         .score-controls {
-            width: 180px;
+            width: 220px;
             padding-left: 1rem;
             display: flex;
             flex-direction: column;
@@ -543,7 +543,6 @@
 
             if (!customId) return alert("カスタムIDを入力してください");
 
-            // 質問設定、スタンプ設定、採点データをそれぞれJSON化
             const question_config = questions;
             const stamp_config = { totalScoreRect, groupScoreRects };
             const scores_data = students.map(s => ({ name: s.name, scores: s.scores }));
@@ -562,7 +561,6 @@
             if (currentRecordId) {
                 res = await query.update(payload).eq('id', currentRecordId);
             } else {
-                // 既存のcustom_idがあるか確認、なければ新規作成
                 const { data: existing } = await query.select('id').eq('custom_id', customId).single();
                 if (existing) {
                     currentRecordId = existing.id;
@@ -598,17 +596,14 @@
             currentRecordId = data.id;
             document.getElementById('cloud-pdf-urls').value = data.pdf_urls || '';
             
-            // データの復元
             questions = data.question_config || [];
             if (data.stamp_config) {
                 totalScoreRect = data.stamp_config.totalScoreRect || null;
                 groupScoreRects = data.stamp_config.groupScoreRects || {};
             }
             
-            // 採点データの復元準備
             const rawScoresList = data.scores_data || [];
             
-            // PDF URLsからPDFを自動取得して再構築
             if (data.pdf_urls) {
                 const urls = data.pdf_urls.split(/[\n,]/).map(u => u.trim()).filter(u => u);
                 if (urls.length > 0) {
@@ -623,12 +618,11 @@
                             const response = await fetch(urls[i]);
                             const blob = await response.blob();
                             const file = new File([blob], `student_${i+1}.pdf`, { type: 'application/pdf' });
-                            const name = `Student ${i+1}`;
+                            const found = rawScoresList[i];
+                            const name = found ? found.name : `Student ${i+1}`;
                             const pages = await extractPages(file, SCALE);
                             
-                            // 既存の採点データがあれば割り当て
                             let savedScores = {};
-                            const found = rawScoresList.find(r => r.name === name);
                             if (found) savedScores = found.scores;
 
                             students.push({ name, pages, scores: savedScores });
@@ -668,7 +662,6 @@
             const SCALE = 2.0;
 
             if (isOnePerFile) {
-                // 個別ファイル
                 for (let i = 0; i < rawFiles.length; i++) {
                     const file = rawFiles[i];
                     const name = file.name.replace(/\.[^/.]+$/, "");
@@ -677,7 +670,6 @@
                     if (i === 0) allPages = pages; 
                 }
             } else {
-                // 1ファイルに全員分（1人あたりのページ数指定）
                 const pagesPerStudent = parseInt(document.getElementById('pages-per-student').value) || 1;
                 const file = rawFiles[0];
                 const fullPages = await extractPages(file, SCALE);
@@ -800,7 +792,6 @@
             drawSelection();
         }
 
-        // Enhanced Pointer Events for Pan/Zoom
         container.onpointerdown = (e) => {
             activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
             if (activePointers.size === 1) {
@@ -900,22 +891,36 @@
             document.getElementById('active-q-display').innerHTML = `${q.label} <span class="text-slate-400 font-medium text-sm ml-2">/ ${q.max} pts</span>`;
             const list = document.getElementById('scoring-list'); list.innerHTML = '';
             
-            students.forEach((s) => {
+            students.forEach((s, idx) => {
                 const card = document.createElement('div'); card.className = 'scoring-card';
                 const cropBox = document.createElement('div'); cropBox.className = 'crop-container';
-                const cropCanvas = document.createElement('canvas'); const rw = q.rect.w, rh = q.rect.h;
+                const cropCanvas = document.createElement('canvas'); const rw = q.rect ? q.rect.w : 100, rh = q.rect ? q.rect.h : 100;
                 cropCanvas.width = rw; cropCanvas.height = rh;
                 
-                const targetPage = s.pages[q.rect.pageIdx];
-                if (targetPage) {
-                    cropCanvas.getContext('2d').drawImage(targetPage, q.rect.x, q.rect.y, rw, rh, 0, 0, rw, rh);
+                if (q.rect) {
+                    const targetPage = s.pages[q.rect.pageIdx];
+                    if (targetPage) {
+                        cropCanvas.getContext('2d').drawImage(targetPage, q.rect.x, q.rect.y, rw, rh, 0, 0, rw, rh);
+                    }
                 }
                 
                 cropBox.appendChild(cropCanvas);
                 const controls = document.createElement('div'); controls.className = 'score-controls';
-                controls.innerHTML = `<span class="text-[10px] font-black text-slate-300 uppercase mb-1 truncate tracking-tight">${s.name}</span><div class="flex items-end gap-2"><input type="number" step="any" inputmode="decimal" class="score-input" value="${s.scores[q.id] || ''}"><span class="text-slate-300 font-bold text-xs mb-2">/ ${q.max}</span></div>`;
                 
-                const input = controls.querySelector('input'); 
+                // 生徒名手入力フィールド + 点数コントロール + 個別PDFダウンロードボタン群
+                controls.innerHTML = `
+                    <input type="text" class="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 mb-2 outline-none focus:border-blue-500" value="${s.name}" oninput="students[${idx}].name = this.value">
+                    <div class="flex items-end gap-2 mb-2">
+                        <input type="number" step="any" inputmode="decimal" class="score-input" value="${s.scores[q.id] || ''}">
+                        <span class="text-slate-300 font-bold text-xs mb-2">/ ${q.max}</span>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="exportSingleOriginalPDF(${idx})" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold py-1 rounded transition-all">採点前PDF</button>
+                        <button onclick="exportSingleGradedPDF(${idx})" class="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 text-[10px] font-bold py-1 rounded transition-all">採点後PDF</button>
+                    </div>
+                `;
+                
+                const input = controls.querySelector('.score-input'); 
                 input.oninput = () => { s.scores[q.id] = input.value; updateGlobalStats(); };
                 
                 card.appendChild(cropBox); card.appendChild(controls); list.appendChild(card);
@@ -936,7 +941,64 @@
         function prevQuestion() { if (activeQIdx > 0) { activeQIdx--; renderScoringList(); } }
         function backToSettings() { document.getElementById('step-3').classList.add('hidden'); document.getElementById('step-2').classList.remove('hidden'); drawSelection(); }
 
-        // PDF Export with Multi-Page Support
+        // 個別の採点前PDF出力
+        async function exportSingleOriginalPDF(idx) {
+            const s = students[idx];
+            const firstPage = s.pages[0];
+            const orientation = firstPage.width > firstPage.height ? 'l' : 'p';
+            const doc = new jsPDF({ unit: 'pt', format: [firstPage.width, firstPage.height], orientation: orientation });
+            
+            for (let i = 0; i < s.pages.length; i++) {
+                const page = s.pages[i];
+                if (i > 0) {
+                    const pageOrientation = page.width > page.height ? 'l' : 'p';
+                    doc.addPage([page.width, page.height], pageOrientation);
+                }
+                doc.setPage(i + 1);
+                doc.addImage(page.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, page.width, page.height);
+            }
+            doc.save(`${s.name}_採点前.pdf`);
+        }
+
+        // 個別の採点後PDF出力
+        async function exportSingleGradedPDF(idx) {
+            const s = students[idx];
+            const firstPage = s.pages[0];
+            const orientation = firstPage.width > firstPage.height ? 'l' : 'p';
+            const doc = new jsPDF({ unit: 'pt', format: [firstPage.width, firstPage.height], orientation: orientation });
+            
+            for (let i = 0; i < s.pages.length; i++) {
+                const page = s.pages[i];
+                if (i > 0) {
+                    const pageOrientation = page.width > page.height ? 'l' : 'p';
+                    doc.addPage([page.width, page.height], pageOrientation);
+                }
+                doc.setPage(i + 1);
+                doc.addImage(page.toDataURL('image/jpeg', 0.75), 'JPEG', 0, 0, page.width, page.height);
+                
+                questions.forEach(q => { 
+                    if (q.rect && q.rect.pageIdx === i && s.scores[q.id] !== undefined && s.scores[q.id] !== "") {
+                        drawMarkPDF(doc, s.scores[q.id], q.max, q.rect); 
+                    }
+                });
+                
+                if (totalScoreRect && totalScoreRect.pageIdx === i) {
+                    const total = questions.reduce((sum, q) => sum + (parseFloat(s.scores[q.id]) || 0), 0);
+                    drawTotalMarkPDF(doc, total, totalScoreRect);
+                }
+                
+                Object.keys(groupScoreRects).forEach(gid => {
+                    const r = groupScoreRects[gid];
+                    if(r.pageIdx === i) {
+                        const gTotal = questions.filter(q => q.group == gid).reduce((sum, q) => sum + (parseFloat(s.scores[q.id]) || 0), 0);
+                        drawTotalMarkPDF(doc, gTotal, r);
+                    }
+                });
+            }
+            doc.save(`${s.name}_採点後.pdf`);
+        }
+
+        // PDF Export with Multi-Page Support (全員分ZIP一括)
         async function exportGradedPDFs() {
             const btn = document.getElementById('export-btn');
             btn.innerText = "生成中..."; btn.disabled = true;
