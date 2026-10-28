@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>採点エディタ v2.2.1</title>
+    <title>採点エディタ v2.3.2</title>
     <!-- Dependencies -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -145,7 +145,7 @@
             <div class="flex items-center gap-4">
                 <h1 class="text-lg font-black tracking-tighter text-slate-800 flex items-center gap-2">
                     <span class="bg-slate-800 text-white p-1 rounded">ES</span>
-                    SCORER <span class="text-slate-400 font-medium text-[10px] ml-1 tracking-normal">v2.2.1</span>
+                    SCORER <span class="text-slate-400 font-medium text-[10px] ml-1 tracking-normal">v2.3.2</span>
                 </h1>
             </div>
             <!-- Cloud & Stats Header UI -->
@@ -381,16 +381,8 @@
         const SUPABASE_URL = 'https://qfzyrogwyjbzbblnvqzy.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_tXLLvKe_L-27OsGU-GH3Zw_176oxBqw'.trim();
         
-        // ヘッダーに直接 apikey と Authorization をセットして確実に認証を通す
-        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-            auth: { persistSession: false },
-            global: {
-                headers: {
-                    'apikey': SUPABASE_ANON_KEY,
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                }
-            }
-        });
+        // Supabase Client の標準初期化
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         
         let currentRecordId = null;
 
@@ -598,70 +590,57 @@
                 scores_data: scores_data
             };
 
+            // REST API ダイレクト送信（apikeyおよびBearerヘッダー、URLパラメータを確実に補完）
             try {
-                // SDK経由での更新・挿入を試行
-                let query = supabaseClient.from('tests');
-                let res;
+                const headers = {
+                    'apikey': SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                    'Content-Type': 'application/json',
+                    'Prefer': 'return=representation'
+                };
+
+                let endpoint = `${SUPABASE_URL}/rest/v1/tests?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}`;
+                let method = 'POST';
+
                 if (currentRecordId) {
-                    res = await query.update(payload).eq('id', currentRecordId);
+                    endpoint += `&id=eq.${currentRecordId}`;
+                    method = 'PATCH';
                 } else {
-                    const { data: existing } = await query.select('id').eq('custom_id', customId).single();
-                    if (existing) {
-                        currentRecordId = existing.id;
-                        res = await query.update(payload).eq('id', currentRecordId);
-                    } else {
-                        res = await query.insert([payload]).select();
-                        if (res.data && res.data.length > 0) currentRecordId = res.data[0].id;
+                    // 既存チェック
+                    const checkResp = await fetch(`${SUPABASE_URL}/rest/v1/tests?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}&select=id&custom_id=eq.${encodeURIComponent(customId)}`, {
+                        headers: headers
+                    });
+                    if (checkResp.ok) {
+                        const existing = await checkResp.json();
+                        if (existing && existing.length > 0) {
+                            currentRecordId = existing[0].id;
+                            endpoint += `&id=eq.${currentRecordId}`;
+                            method = 'PATCH';
+                        }
                     }
                 }
 
-                if (res.error) {
-                    throw res.error;
+                const response = await fetch(endpoint, {
+                    method: method,
+                    headers: headers,
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errJson = await response.json().catch(() => ({}));
+                    throw new Error(errJson.message || `HTTPエラー ${response.status}`);
                 }
+
+                const resData = await response.json();
+                if (Array.isArray(resData) && resData.length > 0) {
+                    currentRecordId = resData[0].id;
+                }
+
                 alert("クラウドに保存しました！");
                 closeCloudModal();
             } catch (err) {
-                console.warn("SDKでの保存に失敗したため、REST API直接通信に切り替えます:", err);
-                
-                // REST API によるダイレクトフォールバック保存
-                try {
-                    const headers = {
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                        'Content-Type': 'application/json',
-                        'Prefer': 'return=representation'
-                    };
-
-                    let endpoint = `${SUPABASE_URL}/rest/v1/tests`;
-                    let method = 'POST';
-
-                    if (currentRecordId) {
-                        endpoint += `?id=eq.${currentRecordId}`;
-                        method = 'PATCH';
-                    }
-
-                    const response = await fetch(endpoint, {
-                        method: method,
-                        headers: headers,
-                        body: JSON.stringify(payload)
-                    });
-
-                    if (!response.ok) {
-                        const errJson = await response.json().catch(() => ({}));
-                        throw new Error(errJson.message || `HTTPエラー ${response.status}`);
-                    }
-
-                    const resData = await response.json();
-                    if (Array.isArray(resData) && resData.length > 0) {
-                        currentRecordId = resData[0].id;
-                    }
-
-                    alert("クラウドに保存しました！（直接通信）");
-                    closeCloudModal();
-                } catch (restErr) {
-                    console.error("保存失敗:", restErr);
-                    alert("保存に失敗しました: " + restErr.message);
-                }
+                console.error("保存失敗:", err);
+                alert("保存に失敗しました: " + err.message);
             }
         }
 
@@ -672,40 +651,28 @@
 
             let data = null;
 
-            // 1. SDKでの取得を試行
+            // apikeyヘッダー・Bearerトークン・URLクエリパラメータを全て明示指定して取得
             try {
-                const res = await supabaseClient
-                    .from('tests')
-                    .select('*')
-                    .eq('custom_id', customId)
-                    .single();
-                if (!res.error && res.data) {
-                    data = res.data;
-                }
-            } catch (e) {
-                console.warn("SDKでのデータ読み込みに失敗しました。REST API直接通信でリトライします。");
-            }
-
-            // 2. SDKで失敗した場合、REST APIで直接取得を試行
-            if (!data) {
-                try {
-                    const resp = await fetch(`${SUPABASE_URL}/rest/v1/tests?custom_id=eq.${encodeURIComponent(customId)}`, {
-                        method: 'GET',
-                        headers: {
-                            'apikey': SUPABASE_ANON_KEY,
-                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                        }
-                    });
-                    if (resp.ok) {
-                        const list = await resp.json();
-                        if (list && list.length > 0) data = list[0];
+                const url = `${SUPABASE_URL}/rest/v1/tests?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}&select=*&custom_id=eq.${encodeURIComponent(customId)}`;
+                const resp = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                     }
-                } catch (fetchErr) {
-                    console.error("REST API取得エラー:", fetchErr);
+                });
+                if (resp.ok) {
+                    const list = await resp.json();
+                    if (list && list.length > 0) data = list[0];
+                } else {
+                    const errJson = await resp.json().catch(() => ({}));
+                    console.error("データ取得エラー詳細:", errJson);
                 }
+            } catch (fetchErr) {
+                console.error("REST API取得エラー:", fetchErr);
             }
 
-            if (!data) return alert("データが見つかりませんでした (APIキーや通信状況を確認してください)");
+            if (!data) return alert("データが見つかりませんでした (APIキーや認証設定を確認してください)");
             if (data.password && data.password !== password) return alert("パスワードが一致しません");
 
             currentRecordId = data.id;
