@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - ページが見つかりませんでした</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', 'Noto Sans JP', sans-serif;
+            background-color: #fafafa;
+            color: #171717;
+        }
+
+        /* 繊細なグリッド背景 */
+        .bg-grid {
+            background-size: 32px 32px;
+            background-image: 
+                linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+        }
+
+        /* やわらかい揺らぎアニメーション */
+        @keyframes subtle-float {
+            0%, 100% {
+                transform: translateY(0) scale(1);
+            }
+            50% {
+                transform: translateY(-8px) scale(1.02);
+            }
+        }
+
+        /* 幾何学リングのゆったりとした回転 */
+        @keyframes rotate-slow {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        .animate-subtle-float {
+            animation: subtle-float 6s ease-in-out infinite;
+        }
+
+        .animate-rotate-slow {
+            animation: rotate-slow 25s linear infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6 relative bg-grid overflow-hidden antialiased select-none">
+
+    <!-- 背景のソフトグラデーションオーブ -->
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[450px] h-[450px] sm:w-[650px] sm:h-[650px] bg-gradient-to-tr from-stone-200/60 via-slate-100/80 to-zinc-200/50 rounded-full blur-3xl pointer-events-none"></div>
+
+    <!-- 幾何学的なグラフィックリング（上品なアクセント） -->
+    <div class="absolute top-1/2 left-1/2 w-[300px] h-[300px] sm:w-[420px] sm:h-[420px] border border-neutral-300/40 rounded-full border-dashed animate-rotate-slow pointer-events-none"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[200px] h-[200px] sm:w-[280px] sm:h-[280px] border border-neutral-200/60 rounded-full pointer-events-none"></div>
+
+    <main class="relative z-10 max-w-md w-full text-center space-y-8">
+        
+        <!-- 404 ビジュアル表記 -->
+        <div class="relative flex justify-center items-center py-4">
+            <h1 class="text-8xl sm:text-9xl font-extralight tracking-widest text-neutral-300/80 animate-subtle-float select-none drop-shadow-sm">
+                404
+            </h1>
+            <!-- 輝きの小さなワンポイント -->
+            <div class="absolute top-2 right-12 sm:right-16 w-2 h-2 bg-neutral-400/60 rounded-full blur-[1px] animate-pulse"></div>
+        </div>
+
+        <!-- メッセージ領域 -->
+        <div class="space-y-3">
+            <h2 class="text-lg sm:text-xl font-medium tracking-tight text-neutral-800">
+                お探しのページは見つかりませんでした
+            </h2>
+            <p class="text-xs sm:text-sm text-neutral-400 font-light leading-relaxed max-w-xs mx-auto">
+                アクセスしようとしたページは削除されたか、URLが間違っている可能性があります。
+            </p>
+        </div>
+
+        <!-- デザインアクセント（中央のラインとドット） -->
+        <div class="flex items-center justify-center gap-2 pt-2">
+            <div class="w-6 h-[1px] bg-neutral-200"></div>
+            <div class="w-1.5 h-1.5 rounded-full bg-neutral-300"></div>
+            <div class="w-6 h-[1px] bg-neutral-200"></div>
+        </div>
+
+    </main>
+
+</body>
+</html>
