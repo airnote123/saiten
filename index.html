@@ -881,6 +881,7 @@
             updateGuide();
         }
 
+
 function detectRectCandidates() {
     autoCandidates = [];
 
@@ -891,12 +892,12 @@ function detectRectCandidates() {
         const imgData = ctx.getImageData(0, 0, w, h);
         const data = imgData.data;
 
-        // 検出用画像の縮小率
-        const scale = 0.35;
+        // 検出用画像を縮小
+        const scale = 0.25;
         const sw = Math.floor(w * scale);
         const sh = Math.floor(h * scale);
 
-        const mask = new Uint8Array(sw * sh);
+        const grid = new Uint8Array(sw * sh);
 
         // --------------------------------
         // 1. 二値化
@@ -911,110 +912,268 @@ function detectRectCandidates() {
                     (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
 
                 if (brightness < 180) {
-                    mask[y * sw + x] = 1;
+                    grid[y * sw + x] = 1;
                 }
             }
         }
 
         // --------------------------------
-        // 2. 短い線の切れ目を補う
+        // 2. 共有境界線の検出
         // --------------------------------
-        // 8方向について、短い空白を補間する。
-        // 長い点線・破線を実線として扱わないよう、
-        // 補間距離は最大2ピクセルに制限する。
-        const directions = [
-            [1, 0],
-            [0, 1],
-            [1, 1],
-            [1, -1],
-            [-1, 1],
-            [-1, -1],
-            [-1, 0],
-            [0, -1]
-        ];
+        // 縦方向・横方向の両方を調べる。
+        // 少し傾いた仕切り線も考慮する。
+        function findSeparator(box) {
+            const { minX, maxX, minY, maxY } = box;
+            const boxW = maxX - minX;
+            const boxH = maxY - minY;
 
-        const bridge = new Uint8Array(mask);
+            const minW = 80 * scale;
+            const minH = 40 * scale;
 
-        for (let y = 0; y < sh; y++) {
-            for (let x = 0; x < sw; x++) {
-                if (!mask[y * sw + x]) continue;
+            let best = null;
 
-                for (const [dx, dy] of directions) {
-                    for (let distance = 2; distance <= 3; distance++) {
-                        const nx = x + dx * distance;
-                        const ny = y + dy * distance;
+            function evaluate(axis) {
+                const isVertical = axis === 'vertical';
 
+                const start = isVertical ? minY : minX;
+                const end = isVertical ? maxY : maxX;
+                const length = end - start;
+
+                if (length < 20) return;
+
+                const margin = Math.max(2, Math.floor(length * 0.12));
+                const usableLength = length - margin * 2;
+
+                if (usableLength < 12) return;
+
+                const minPosition = isVertical
+                    ? minX + boxW * 0.20
+                    : minY + boxH * 0.20;
+
+                const maxPosition = isVertical
+                    ? maxX - boxW * 0.20
+                    : maxY - boxH * 0.20;
+
+                const center = (start + end) / 2;
+
+                // 傾き -0.20 ～ +0.20 を検査
+                for (
+                    let slope = -0.20;
+                    slope <= 0.2001;
+                    slope += 0.04
+                ) {
+                    for (
+                        let base = minPosition;
+                        base <= maxPosition;
+                        base += 1
+                    ) {
+                        let hitCount = 0;
+                        let longestRun = 0;
+                        let currentRun = 0;
+
+                        for (
+                            let p = start + margin;
+                            p <= end - margin;
+                            p++
+                        ) {
+                            const position =
+                                base + slope * (p - center);
+
+                            let found = false;
+
+                            // 線の太さや縮小時の欠けを許容
+                            for (let offset = -1; offset <= 1; offset++) {
+                                const px = isVertical
+                                    ? Math.round(position) + offset
+                                    : p;
+
+                                const py = isVertical
+                                    ? p
+                                    : Math.round(position) + offset;
+
+                                if (
+                                    px >= 0 && px < sw &&
+                                    py >= 0 && py < sh &&
+                                    grid[py * sw + px]
+                                ) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+
+                            if (found) {
+                                hitCount++;
+                                currentRun++;
+                                longestRun = Math.max(
+                                    longestRun,
+                                    currentRun
+                                );
+                            } else {
+                                currentRun = 0;
+                            }
+                        }
+
+                        const coverage = hitCount / usableLength;
+                        const continuous = longestRun / usableLength;
+
+                        // ある程度長く、連続している線だけ採用
                         if (
-                            nx < 0 || nx >= sw ||
-                            ny < 0 || ny >= sh
+                            coverage < 0.72 ||
+                            continuous < 0.60
                         ) {
                             continue;
                         }
 
-                        if (mask[ny * sw + nx]) {
-                            for (let k = 1; k < distance; k++) {
-                                const bx = x + dx * k;
-                                const by = y + dy * k;
+                        // 分割後に小さすぎる領域ができないか確認
+                        const splitPosition = base;
 
-                                if (
-                                    bx >= 0 && bx < sw &&
-                                    by >= 0 && by < sh
-                                ) {
-                                    bridge[by * sw + bx] = 1;
-                                }
+                        if (isVertical) {
+                            if (
+                                splitPosition - minX < minW ||
+                                maxX - splitPosition < minW
+                            ) {
+                                continue;
                             }
-                            break;
+                        } else {
+                            if (
+                                splitPosition - minY < minH ||
+                                maxY - splitPosition < minH
+                            ) {
+                                continue;
+                            }
+                        }
+
+                        const score = coverage * 0.7 + continuous * 0.3;
+
+                        if (!best || score > best.score) {
+                            best = {
+                                axis,
+                                position: splitPosition,
+                                score
+                            };
                         }
                     }
                 }
             }
+
+            evaluate('vertical');
+            evaluate('horizontal');
+
+            return best;
         }
 
         // --------------------------------
-        // 3. 連結成分を抽出
+        // 3. 候補領域を再帰的に分割
+        // --------------------------------
+        function splitBox(box, depth = 0) {
+            const boxW = box.maxX - box.minX;
+            const boxH = box.maxY - box.minY;
+
+            // 小さすぎる領域は除外
+            if (
+                boxW < 80 * scale ||
+                boxH < 40 * scale
+            ) {
+                return [];
+            }
+
+            // 無限分割を防止
+            if (depth >= 6) {
+                return [box];
+            }
+
+            const separator = findSeparator(box);
+
+            if (!separator) {
+                return [box];
+            }
+
+            const p = separator.position;
+            let first;
+            let second;
+
+            if (separator.axis === 'vertical') {
+                first = {
+                    minX: box.minX,
+                    maxX: p,
+                    minY: box.minY,
+                    maxY: box.maxY
+                };
+
+                second = {
+                    minX: p,
+                    maxX: box.maxX,
+                    minY: box.minY,
+                    maxY: box.maxY
+                };
+            } else {
+                first = {
+                    minX: box.minX,
+                    maxX: box.maxX,
+                    minY: box.minY,
+                    maxY: p
+                };
+
+                second = {
+                    minX: box.minX,
+                    maxX: box.maxX,
+                    minY: p,
+                    maxY: box.maxY
+                };
+            }
+
+            // 分割した両方をさらに調べる
+            return [
+                ...splitBox(first, depth + 1),
+                ...splitBox(second, depth + 1)
+            ];
+        }
+
+        // --------------------------------
+        // 4. 連結成分を検出
         // --------------------------------
         const visited = new Uint8Array(sw * sh);
+
         const neighbors = [
             [-1, -1], [0, -1], [1, -1],
             [-1, 0],           [1, 0],
             [-1, 1],  [0, 1],  [1, 1]
         ];
 
-        for (let startY = 0; startY < sh; startY++) {
-            for (let startX = 0; startX < sw; startX++) {
-                const startIndex = startY * sw + startX;
+        for (let y = 0; y < sh; y++) {
+            for (let x = 0; x < sw; x++) {
+                const startIndex = y * sw + x;
 
-                if (!bridge[startIndex] || visited[startIndex]) {
+                if (!grid[startIndex] || visited[startIndex]) {
                     continue;
                 }
 
                 const queue = [startIndex];
                 visited[startIndex] = 1;
 
-                const points = [];
-
-                let minX = startX;
-                let maxX = startX;
-                let minY = startY;
-                let maxY = startY;
-
                 let head = 0;
 
-                while (head < queue.length && points.length < 30000) {
+                let minX = x;
+                let maxX = x;
+                let minY = y;
+                let maxY = y;
+                let count = 0;
+
+                while (head < queue.length) {
                     const index = queue[head++];
-                    const x = index % sw;
-                    const y = Math.floor(index / sw);
+                    const cx = index % sw;
+                    const cy = Math.floor(index / sw);
 
-                    points.push([x, y]);
+                    count++;
 
-                    minX = Math.min(minX, x);
-                    maxX = Math.max(maxX, x);
-                    minY = Math.min(minY, y);
-                    maxY = Math.max(maxY, y);
+                    minX = Math.min(minX, cx);
+                    maxX = Math.max(maxX, cx);
+                    minY = Math.min(minY, cy);
+                    maxY = Math.max(maxY, cy);
 
                     for (const [dx, dy] of neighbors) {
-                        const nx = x + dx;
-                        const ny = y + dy;
+                        const nx = cx + dx;
+                        const ny = cy + dy;
 
                         if (
                             nx < 0 || nx >= sw ||
@@ -1025,224 +1184,57 @@ function detectRectCandidates() {
 
                         const ni = ny * sw + nx;
 
-                        if (bridge[ni] && !visited[ni]) {
+                        if (grid[ni] && !visited[ni]) {
                             visited[ni] = 1;
                             queue.push(ni);
                         }
                     }
                 }
 
-                // 小さすぎる成分を除外
-                if (points.length < 80) continue;
+                // 小さな文字などの成分を除外
+                if (count < 50) continue;
 
-                const boxW = maxX - minX;
-                const boxH = maxY - minY;
-
-                if (
-                    boxW < 80 * scale ||
-                    boxH < 40 * scale ||
-                    boxW > sw * 0.95 ||
-                    boxH > sh * 0.8
-                ) {
-                    continue;
-                }
-
-                // --------------------------------
-                // 4. 主成分方向を計算
-                // --------------------------------
-                // 枠全体の傾きを推定する。
-                const centerX =
-                    points.reduce((s, p) => s + p[0], 0) / points.length;
-                const centerY =
-                    points.reduce((s, p) => s + p[1], 0) / points.length;
-
-                let xx = 0;
-                let yy = 0;
-                let xy = 0;
-
-                for (const [x, y] of points) {
-                    const dx = x - centerX;
-                    const dy = y - centerY;
-
-                    xx += dx * dx;
-                    yy += dy * dy;
-                    xy += dx * dy;
-                }
-
-                const angle =
-                    0.5 * Math.atan2(2 * xy, xx - yy);
-
-                const cos = Math.cos(angle);
-                const sin = Math.sin(angle);
-
-                // --------------------------------
-                // 5. 傾いた枠の4辺を検査
-                // --------------------------------
-                const projected = [];
-
-                let minU = Infinity;
-                let maxU = -Infinity;
-                let minV = Infinity;
-                let maxV = -Infinity;
-
-                for (const [x, y] of points) {
-                    const dx = x - centerX;
-                    const dy = y - centerY;
-
-                    const u = dx * cos + dy * sin;
-                    const v = -dx * sin + dy * cos;
-
-                    projected.push([u, v]);
-
-                    minU = Math.min(minU, u);
-                    maxU = Math.max(maxU, u);
-                    minV = Math.min(minV, v);
-                    maxV = Math.max(maxV, v);
-                }
-
-                const rectW = maxU - minU;
-                const rectH = maxV - minV;
-
-                if (rectW < 80 * scale || rectH < 40 * scale) {
-                    continue;
-                }
-
-                // 12°を超える傾きは対象外
-                const angleDeg = Math.abs(angle * 180 / Math.PI);
-
-                if (
-                    angleDeg > 12 &&
-                    Math.abs(angleDeg - 90) > 12
-                ) {
-                    continue;
-                }
-
-                // 4辺それぞれの線の連続性を確認
-                const binsU = Math.max(1, Math.ceil(rectW));
-                const binsV = Math.max(1, Math.ceil(rectH));
-
-                const top = new Uint8Array(binsU);
-                const bottom = new Uint8Array(binsU);
-                const left = new Uint8Array(binsV);
-                const right = new Uint8Array(binsV);
-
-                const tolerance = 2.5;
-
-                for (const [u, v] of projected) {
-                    const bu = Math.floor(u - minU);
-                    const bv = Math.floor(v - minV);
-
-                    if (bu >= 0 && bu < binsU) {
-                        if (Math.abs(v - minV) <= tolerance) {
-                            top[bu] = 1;
-                        }
-
-                        if (Math.abs(v - maxV) <= tolerance) {
-                            bottom[bu] = 1;
-                        }
-                    }
-
-                    if (bv >= 0 && bv < binsV) {
-                        if (Math.abs(u - minU) <= tolerance) {
-                            left[bv] = 1;
-                        }
-
-                        if (Math.abs(u - maxU) <= tolerance) {
-                            right[bv] = 1;
-                        }
-                    }
-                }
-
-                function coverage(arr) {
-                    let count = 0;
-                    let longest = 0;
-                    let current = 0;
-
-                    for (const value of arr) {
-                        if (value) {
-                            count++;
-                            current++;
-                            longest = Math.max(longest, current);
-                        } else {
-                            current = 0;
-                        }
-                    }
-
-                    return {
-                        ratio: count / arr.length,
-                        longest: longest / arr.length
-                    };
-                }
-
-                const edgeScores = [
-                    coverage(top),
-                    coverage(bottom),
-                    coverage(left),
-                    coverage(right)
-                ];
-
-                // 4辺がある程度連続していることを要求
-                const validEdges = edgeScores.every(score =>
-                    score.ratio >= 0.35 &&
-                    score.longest >= 0.20
-                );
-
-                if (!validEdges) continue;
-
-                // --------------------------------
-                // 6. 回転した矩形を通常の矩形に戻す
-                // --------------------------------
-                const corners = [
-                    [minU, minV],
-                    [maxU, minV],
-                    [maxU, maxV],
-                    [minU, maxV]
-                ];
-
-                const originalCorners = corners.map(([u, v]) => {
-                    return [
-                        centerX + u * cos - v * sin,
-                        centerY + u * sin + v * cos
-                    ];
-                });
-
-                const finalMinX = Math.min(
-                    ...originalCorners.map(p => p[0])
-                );
-                const finalMaxX = Math.max(
-                    ...originalCorners.map(p => p[0])
-                );
-                const finalMinY = Math.min(
-                    ...originalCorners.map(p => p[1])
-                );
-                const finalMaxY = Math.max(
-                    ...originalCorners.map(p => p[1])
-                );
-
-                const candidate = {
-                    x: finalMinX / scale,
-                    y: finalMinY / scale,
-                    w: (finalMaxX - finalMinX) / scale,
-                    h: (finalMaxY - finalMinY) / scale,
-                    pageIdx: pageIdx
+                const box = {
+                    minX,
+                    maxX,
+                    minY,
+                    maxY
                 };
 
-                // ページ外・極端に大きい候補を除外
-                if (
-                    candidate.x < 0 ||
-                    candidate.y < 0 ||
-                    candidate.x + candidate.w > w * 1.02 ||
-                    candidate.y + candidate.h > h * 1.02
-                ) {
-                    continue;
-                }
+                // --------------------------------
+                // 5. 共有境界線で分割
+                // --------------------------------
+                const dividedBoxes = splitBox(box);
 
-                autoCandidates.push(candidate);
+                for (const part of dividedBoxes) {
+                    const boxW = (part.maxX - part.minX) / scale;
+                    const boxH = (part.maxY - part.minY) / scale;
+
+                    const boxX = part.minX / scale;
+                    const boxY = part.minY / scale;
+
+                    if (
+                        boxW > 80 &&
+                        boxH > 40 &&
+                        boxW < w * 0.95 &&
+                        boxH < h * 0.8
+                    ) {
+                        autoCandidates.push({
+                            x: boxX,
+                            y: boxY,
+                            w: boxW,
+                            h: boxH,
+                            pageIdx: pageIdx
+                        });
+                    }
+                }
             }
         }
     });
 
-    // 重複候補を除去
+    // --------------------------------
+    // 6. 重複候補を除去
+    // --------------------------------
     autoCandidates = filterOverlappingCandidates(autoCandidates);
 
     if (autoCandidates.length === 0) {
@@ -1253,6 +1245,7 @@ function detectRectCandidates() {
 
     drawSelection();
 }
+
 
         function filterOverlappingCandidates(candidates) {
             const result = [];
