@@ -122,7 +122,6 @@
             z-index: 100;
         }
 
-        /* QR Code Scanner Overlay Box */
         .qr-target-box {
             position: relative;
             width: 220px;
@@ -132,7 +131,6 @@
             box-shadow: 0 0 0 4000px rgba(15, 23, 42, 0.5);
         }
         
-        /* Custom scrollbar hiding helper */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
@@ -377,11 +375,10 @@
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         const { jsPDF } = window.jspdf;
 
-        // Supabase Client Setup
+        // --- Supabase Client Setup (標準仕様に従ったシンプルな初期化) ---
         const SUPABASE_URL = 'https://qfzyrogwyjbzbblnvqzy.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_tXLLvKe_L-27OsGU-GH3Zw176oxBqw'.trim();
+        const SUPABASE_ANON_KEY = 'sb_publishable_tXLLvKe_L-27OsGU-GH3Zw_176oxBqw'.trim();
         
-        // Supabase Client の標準初期化
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         
         let currentRecordId = null;
@@ -404,8 +401,8 @@
         let groupScoreRects = {};
         let currentSettingMode = 'question';
         let rawFiles = [];
-        let autoCandidates = []; // 自動認識された枠の候補リスト [{x, y, w, h, pageIdx}]
-        let isAutoDetectionEnabled = false; // 枠自動認識のON/OFFフラグ
+        let autoCandidates = [];
+        let isAutoDetectionEnabled = false;
         
         let cameraStream = null;
         let animationFrameId = null;
@@ -569,7 +566,7 @@
             document.getElementById('qr-output-box').classList.remove('hidden');
         }
 
-        // --- Supabase Cloud Save & Load ---
+        // --- Supabase Cloud Save & Load (完全なヘッダー・URLパラメータ付与フォールバック対応) ---
         async function cloudSaveData() {
             const customId = document.getElementById('cloud-custom-id').value.trim();
             const password = document.getElementById('cloud-password').value;
@@ -577,27 +574,22 @@
 
             if (!customId) return alert("カスタムIDを入力してください");
 
-            const question_config = questions;
-            const stamp_config = { totalScoreRect, groupScoreRects };
-            const scores_data = students.map(s => ({ name: s.name, scores: s.scores }));
-
             const payload = {
                 custom_id: customId,
                 password: password,
                 pdf_urls: pdfUrlsText,
-                question_config: question_config,
-                stamp_config: stamp_config,
-                scores_data: scores_data
+                question_config: questions,
+                stamp_config: { totalScoreRect, groupScoreRects },
+                scores_data: students.map(s => ({ name: s.name, scores: s.scores }))
             };
 
-            // REST API ダイレクト送信（apikeyおよびBearerヘッダー、URLパラメータを確実に補完）
             try {
                 const headers = {
                     'apikey': SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
                     'Content-Type': 'application/json',
                     'Prefer': 'return=representation'
                 };
-
 
                 let endpoint = `${SUPABASE_URL}/rest/v1/tests?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}`;
                 let method = 'POST';
@@ -606,7 +598,6 @@
                     endpoint += `&id=eq.${currentRecordId}`;
                     method = 'PATCH';
                 } else {
-                    // 既存チェック
                     const checkResp = await fetch(`${SUPABASE_URL}/rest/v1/tests?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}&select=id&custom_id=eq.${encodeURIComponent(customId)}`, {
                         headers: headers
                     });
@@ -651,16 +642,15 @@
 
             let data = null;
 
-            // apikeyヘッダー・Bearerトークン・URLクエリパラメータを全て明示指定して取得
             try {
                 const url = `${SUPABASE_URL}/rest/v1/tests?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}&select=*&custom_id=eq.${encodeURIComponent(customId)}`;
                 const resp = await fetch(url, {
                     method: 'GET',
                     headers: {
-                        'apikey': SUPABASE_ANON_KEY
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                     }
                 });
-
                 if (resp.ok) {
                     const list = await resp.json();
                     if (list && list.length > 0) data = list[0];
@@ -672,7 +662,7 @@
                 console.error("REST API取得エラー:", fetchErr);
             }
 
-            if (!data) return alert("データが見つかりませんでした (APIキーや認証設定を確認してください)");
+            if (!data) return alert("データが見つかりませんでした");
             if (data.password && data.password !== password) return alert("パスワードが一致しません");
 
             currentRecordId = data.id;
@@ -727,7 +717,7 @@
                 }
             }
             
-            alert("データ・設定の読み込みが完了しました（PDFのURLがないか読み込めませんでした）");
+            alert("データ・設定の読み込みが完了しました");
             closeCloudModal();
         }
 
@@ -855,7 +845,7 @@
             else { guide.innerText = `大問${currentSettingMode.split('-')[1]}の合計位置を指定`; guide.classList.add('mode-group'); }
         }
 
-        // --- 枠の自動認識 (ON/OFF 切り替え & 認識ロジック) ---
+        // --- 枠の自動認識機能 ---
         function toggleAutoDetection(enabled) {
             isAutoDetectionEnabled = enabled;
             const badge = document.getElementById('auto-detect-badge');
@@ -866,7 +856,6 @@
                 badge.className = "text-[9px] bg-indigo-600 text-white px-1.5 py-0.5 rounded font-bold";
                 reDetectBtn.classList.remove('hidden');
                 
-                // 初回ON時や候補が無い場合は自動で認識処理を実行
                 if (autoCandidates.length === 0) {
                     detectRectCandidates();
                 } else {
@@ -881,371 +870,195 @@
             updateGuide();
         }
 
+        function detectRectCandidates() {
+            autoCandidates = [];
 
-function detectRectCandidates() {
-    autoCandidates = [];
+            allPages.forEach((pageCanvas, pageIdx) => {
+                const w = pageCanvas.width;
+                const h = pageCanvas.height;
+                const ctx = pageCanvas.getContext('2d');
+                const imgData = ctx.getImageData(0, 0, w, h);
+                const data = imgData.data;
 
-    allPages.forEach((pageCanvas, pageIdx) => {
-        const w = pageCanvas.width;
-        const h = pageCanvas.height;
-        const ctx = pageCanvas.getContext('2d');
-        const imgData = ctx.getImageData(0, 0, w, h);
-        const data = imgData.data;
+                const scale = 0.25;
+                const sw = Math.floor(w * scale);
+                const sh = Math.floor(h * scale);
+                const grid = new Uint8Array(sw * sh);
 
-        // 検出用画像を縮小
-        const scale = 0.25;
-        const sw = Math.floor(w * scale);
-        const sh = Math.floor(h * scale);
-
-        const grid = new Uint8Array(sw * sh);
-
-        // --------------------------------
-        // 1. 二値化
-        // --------------------------------
-        for (let y = 0; y < sh; y++) {
-            for (let x = 0; x < sw; x++) {
-                const ox = Math.min(w - 1, Math.floor(x / scale));
-                const oy = Math.min(h - 1, Math.floor(y / scale));
-                const idx = (oy * w + ox) * 4;
-
-                const brightness =
-                    (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-
-                if (brightness < 180) {
-                    grid[y * sw + x] = 1;
+                for (let y = 0; y < sh; y++) {
+                    for (let x = 0; x < sw; x++) {
+                        const ox = Math.min(w - 1, Math.floor(x / scale));
+                        const oy = Math.min(h - 1, Math.floor(y / scale));
+                        const idx = (oy * w + ox) * 4;
+                        const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+                        if (brightness < 180) {
+                            grid[y * sw + x] = 1;
+                        }
+                    }
                 }
-            }
-        }
 
-        // --------------------------------
-        // 2. 共有境界線の検出
-        // --------------------------------
-        // 縦方向・横方向の両方を調べる。
-        // 少し傾いた仕切り線も考慮する。
-        function findSeparator(box) {
-            const { minX, maxX, minY, maxY } = box;
-            const boxW = maxX - minX;
-            const boxH = maxY - minY;
+                function findSeparator(box) {
+                    const { minX, maxX, minY, maxY } = box;
+                    const boxW = maxX - minX;
+                    const boxH = maxY - minY;
+                    const minW = 80 * scale;
+                    const minH = 40 * scale;
+                    let best = null;
 
-            const minW = 80 * scale;
-            const minH = 40 * scale;
+                    function evaluate(axis) {
+                        const isVertical = axis === 'vertical';
+                        const start = isVertical ? minY : minX;
+                        const end = isVertical ? maxY : maxX;
+                        const length = end - start;
+                        if (length < 20) return;
 
-            let best = null;
+                        const margin = Math.max(2, Math.floor(length * 0.12));
+                        const usableLength = length - margin * 2;
+                        if (usableLength < 12) return;
 
-            function evaluate(axis) {
-                const isVertical = axis === 'vertical';
+                        const minPosition = isVertical ? minX + boxW * 0.20 : minY + boxH * 0.20;
+                        const maxPosition = isVertical ? maxX - boxW * 0.20 : maxY - boxH * 0.20;
+                        const center = (start + end) / 2;
 
-                const start = isVertical ? minY : minX;
-                const end = isVertical ? maxY : maxX;
-                const length = end - start;
+                        for (let slope = -0.20; slope <= 0.2001; slope += 0.04) {
+                            for (let base = minPosition; base <= maxPosition; base += 1) {
+                                let hitCount = 0;
+                                let longestRun = 0;
+                                let currentRun = 0;
 
-                if (length < 20) return;
+                                for (let p = start + margin; p <= end - margin; p++) {
+                                    const position = base + slope * (p - center);
+                                    let found = false;
 
-                const margin = Math.max(2, Math.floor(length * 0.12));
-                const usableLength = length - margin * 2;
+                                    for (let offset = -1; offset <= 1; offset++) {
+                                        const px = isVertical ? Math.round(position) + offset : p;
+                                        const py = isVertical ? p : Math.round(position) + offset;
 
-                if (usableLength < 12) return;
+                                        if (px >= 0 && px < sw && py >= 0 && py < sh && grid[py * sw + px]) {
+                                            found = true;
+                                            break;
+                                        }
+                                    }
 
-                const minPosition = isVertical
-                    ? minX + boxW * 0.20
-                    : minY + boxH * 0.20;
+                                    if (found) {
+                                        hitCount++;
+                                        currentRun++;
+                                        longestRun = Math.max(longestRun, currentRun);
+                                    } else {
+                                        currentRun = 0;
+                                    }
+                                }
 
-                const maxPosition = isVertical
-                    ? maxX - boxW * 0.20
-                    : maxY - boxH * 0.20;
+                                const coverage = hitCount / usableLength;
+                                const continuous = longestRun / usableLength;
 
-                const center = (start + end) / 2;
+                                if (coverage < 0.72 || continuous < 0.60) continue;
 
-                // 傾き -0.20 ～ +0.20 を検査
-                for (
-                    let slope = -0.20;
-                    slope <= 0.2001;
-                    slope += 0.04
-                ) {
-                    for (
-                        let base = minPosition;
-                        base <= maxPosition;
-                        base += 1
-                    ) {
-                        let hitCount = 0;
-                        let longestRun = 0;
-                        let currentRun = 0;
+                                const splitPosition = base;
+                                if (isVertical) {
+                                    if (splitPosition - minX < minW || maxX - splitPosition < minW) continue;
+                                } else {
+                                    if (splitPosition - minY < minH || maxY - splitPosition < minH) continue;
+                                }
 
-                        for (
-                            let p = start + margin;
-                            p <= end - margin;
-                            p++
-                        ) {
-                            const position =
-                                base + slope * (p - center);
-
-                            let found = false;
-
-                            // 線の太さや縮小時の欠けを許容
-                            for (let offset = -1; offset <= 1; offset++) {
-                                const px = isVertical
-                                    ? Math.round(position) + offset
-                                    : p;
-
-                                const py = isVertical
-                                    ? p
-                                    : Math.round(position) + offset;
-
-                                if (
-                                    px >= 0 && px < sw &&
-                                    py >= 0 && py < sh &&
-                                    grid[py * sw + px]
-                                ) {
-                                    found = true;
-                                    break;
+                                const score = coverage * 0.7 + continuous * 0.3;
+                                if (!best || score > best.score) {
+                                    best = { axis, position: splitPosition, score };
                                 }
                             }
+                        }
+                    }
 
-                            if (found) {
-                                hitCount++;
-                                currentRun++;
-                                longestRun = Math.max(
-                                    longestRun,
-                                    currentRun
-                                );
-                            } else {
-                                currentRun = 0;
+                    evaluate('vertical');
+                    evaluate('horizontal');
+                    return best;
+                }
+
+                function splitBox(box, depth = 0) {
+                    const boxW = box.maxX - box.minX;
+                    const boxH = box.maxY - box.minY;
+
+                    if (boxW < 80 * scale || boxH < 40 * scale) return [];
+                    if (depth >= 6) return [box];
+
+                    const separator = findSeparator(box);
+                    if (!separator) return [box];
+
+                    const p = separator.position;
+                    let first, second;
+
+                    if (separator.axis === 'vertical') {
+                        first = { minX: box.minX, maxX: p, minY: box.minY, maxY: box.maxY };
+                        second = { minX: p, maxX: box.maxX, minY: box.minY, maxY: box.maxY };
+                    } else {
+                        first = { minX: box.minX, maxX: box.maxX, minY: box.minY, maxY: p };
+                        second = { minX: box.minX, maxX: box.maxX, minY: p, maxY: box.maxY };
+                    }
+
+                    return [...splitBox(first, depth + 1), ...splitBox(second, depth + 1)];
+                }
+
+                const visited = new Uint8Array(sw * sh);
+                const neighbors = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+
+                for (let y = 0; y < sh; y++) {
+                    for (let x = 0; x < sw; x++) {
+                        const startIndex = y * sw + x;
+                        if (!grid[startIndex] || visited[startIndex]) continue;
+
+                        const queue = [startIndex];
+                        visited[startIndex] = 1;
+                        let head = 0, minX = x, maxX = x, minY = y, maxY = y, count = 0;
+
+                        while (head < queue.length) {
+                            const index = queue[head++];
+                            const cx = index % sw;
+                            const cy = Math.floor(index / sw);
+                            count++;
+
+                            minX = Math.min(minX, cx);
+                            maxX = Math.max(maxX, cx);
+                            minY = Math.min(minY, cy);
+                            maxY = Math.max(maxY, cy);
+
+                            for (const [dx, dy] of neighbors) {
+                                const nx = cx + dx;
+                                const ny = cy + dy;
+                                if (nx < 0 || nx >= sw || ny < 0 || ny >= sh) continue;
+                                const ni = ny * sw + nx;
+                                if (grid[ni] && !visited[ni]) {
+                                    visited[ni] = 1;
+                                    queue.push(ni);
+                                }
                             }
                         }
 
-                        const coverage = hitCount / usableLength;
-                        const continuous = longestRun / usableLength;
+                        if (count < 50) continue;
+                        const box = { minX, maxX, minY, maxY };
+                        const dividedBoxes = splitBox(box);
 
-                        // ある程度長く、連続している線だけ採用
-                        if (
-                            coverage < 0.72 ||
-                            continuous < 0.60
-                        ) {
-                            continue;
-                        }
+                        for (const part of dividedBoxes) {
+                            const boxW = (part.maxX - part.minX) / scale;
+                            const boxH = (part.maxY - part.minY) / scale;
+                            const boxX = part.minX / scale;
+                            const boxY = part.minY / scale;
 
-                        // 分割後に小さすぎる領域ができないか確認
-                        const splitPosition = base;
-
-                        if (isVertical) {
-                            if (
-                                splitPosition - minX < minW ||
-                                maxX - splitPosition < minW
-                            ) {
-                                continue;
+                            if (boxW > 80 && boxH > 40 && boxW < w * 0.95 && boxH < h * 0.8) {
+                                autoCandidates.push({ x: boxX, y: boxY, w: boxW, h: boxH, pageIdx });
                             }
-                        } else {
-                            if (
-                                splitPosition - minY < minH ||
-                                maxY - splitPosition < minH
-                            ) {
-                                continue;
-                            }
-                        }
-
-                        const score = coverage * 0.7 + continuous * 0.3;
-
-                        if (!best || score > best.score) {
-                            best = {
-                                axis,
-                                position: splitPosition,
-                                score
-                            };
                         }
                     }
                 }
-            }
+            });
 
-            evaluate('vertical');
-            evaluate('horizontal');
-
-            return best;
-        }
-
-        // --------------------------------
-        // 3. 候補領域を再帰的に分割
-        // --------------------------------
-        function splitBox(box, depth = 0) {
-            const boxW = box.maxX - box.minX;
-            const boxH = box.maxY - box.minY;
-
-            // 小さすぎる領域は除外
-            if (
-                boxW < 80 * scale ||
-                boxH < 40 * scale
-            ) {
-                return [];
-            }
-
-            // 無限分割を防止
-            if (depth >= 6) {
-                return [box];
-            }
-
-            const separator = findSeparator(box);
-
-            if (!separator) {
-                return [box];
-            }
-
-            const p = separator.position;
-            let first;
-            let second;
-
-            if (separator.axis === 'vertical') {
-                first = {
-                    minX: box.minX,
-                    maxX: p,
-                    minY: box.minY,
-                    maxY: box.maxY
-                };
-
-                second = {
-                    minX: p,
-                    maxX: box.maxX,
-                    minY: box.minY,
-                    maxY: box.maxY
-                };
+            autoCandidates = filterOverlappingCandidates(autoCandidates);
+            if (autoCandidates.length === 0) {
+                alert("明確な枠が見つかりませんでした。手動で範囲選択を行ってください。");
             } else {
-                first = {
-                    minX: box.minX,
-                    maxX: box.maxX,
-                    minY: box.minY,
-                    maxY: p
-                };
-
-                second = {
-                    minX: box.minX,
-                    maxX: box.maxX,
-                    minY: p,
-                    maxY: box.maxY
-                };
+                alert(`${autoCandidates.length} 個の枠候補を検出しました！`);
             }
-
-            // 分割した両方をさらに調べる
-            return [
-                ...splitBox(first, depth + 1),
-                ...splitBox(second, depth + 1)
-            ];
+            drawSelection();
         }
-
-        // --------------------------------
-        // 4. 連結成分を検出
-        // --------------------------------
-        const visited = new Uint8Array(sw * sh);
-
-        const neighbors = [
-            [-1, -1], [0, -1], [1, -1],
-            [-1, 0],           [1, 0],
-            [-1, 1],  [0, 1],  [1, 1]
-        ];
-
-        for (let y = 0; y < sh; y++) {
-            for (let x = 0; x < sw; x++) {
-                const startIndex = y * sw + x;
-
-                if (!grid[startIndex] || visited[startIndex]) {
-                    continue;
-                }
-
-                const queue = [startIndex];
-                visited[startIndex] = 1;
-
-                let head = 0;
-
-                let minX = x;
-                let maxX = x;
-                let minY = y;
-                let maxY = y;
-                let count = 0;
-
-                while (head < queue.length) {
-                    const index = queue[head++];
-                    const cx = index % sw;
-                    const cy = Math.floor(index / sw);
-
-                    count++;
-
-                    minX = Math.min(minX, cx);
-                    maxX = Math.max(maxX, cx);
-                    minY = Math.min(minY, cy);
-                    maxY = Math.max(maxY, cy);
-
-                    for (const [dx, dy] of neighbors) {
-                        const nx = cx + dx;
-                        const ny = cy + dy;
-
-                        if (
-                            nx < 0 || nx >= sw ||
-                            ny < 0 || ny >= sh
-                        ) {
-                            continue;
-                        }
-
-                        const ni = ny * sw + nx;
-
-                        if (grid[ni] && !visited[ni]) {
-                            visited[ni] = 1;
-                            queue.push(ni);
-                        }
-                    }
-                }
-
-                // 小さな文字などの成分を除外
-                if (count < 50) continue;
-
-                const box = {
-                    minX,
-                    maxX,
-                    minY,
-                    maxY
-                };
-
-                // --------------------------------
-                // 5. 共有境界線で分割
-                // --------------------------------
-                const dividedBoxes = splitBox(box);
-
-                for (const part of dividedBoxes) {
-                    const boxW = (part.maxX - part.minX) / scale;
-                    const boxH = (part.maxY - part.minY) / scale;
-
-                    const boxX = part.minX / scale;
-                    const boxY = part.minY / scale;
-
-                    if (
-                        boxW > 80 &&
-                        boxH > 40 &&
-                        boxW < w * 0.95 &&
-                        boxH < h * 0.8
-                    ) {
-                        autoCandidates.push({
-                            x: boxX,
-                            y: boxY,
-                            w: boxW,
-                            h: boxH,
-                            pageIdx: pageIdx
-                        });
-                    }
-                }
-            }
-        }
-    });
-
-    // --------------------------------
-    // 6. 重複候補を除去
-    // --------------------------------
-    autoCandidates = filterOverlappingCandidates(autoCandidates);
-
-    if (autoCandidates.length === 0) {
-        alert("明確な枠が見つかりませんでした。手動で範囲選択を行ってください。");
-    } else {
-        alert(`${autoCandidates.length} 個の枠候補を検出しました！`);
-    }
-
-    drawSelection();
-}
-
 
         function filterOverlappingCandidates(candidates) {
             const result = [];
@@ -1265,9 +1078,7 @@ function detectRectCandidates() {
                         }
                     }
                 }
-                if (!isOverlap) {
-                    result.push(cand);
-                }
+                if (!isOverlap) result.push(cand);
             }
             return result;
         }
@@ -1333,7 +1144,7 @@ function detectRectCandidates() {
                 const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
                 const oldZoom = zoom;
                 zoom = initialZoom * (dist / initialDistance);
-                const midX = (pts[0].x + pts[0].x) / 2;
+                const midX = (pts[0].x + pts[1].x) / 2;
                 const midY = (pts[0].y + pts[1].y) / 2;
                 offsetX = midX - (midX - offsetX) * (zoom / oldZoom);
                 offsetY = midY - (midY - offsetY) * (zoom / oldZoom);
@@ -1369,7 +1180,6 @@ function detectRectCandidates() {
             }
             const relativeY = worldY - currentY;
 
-            // 1. 自動検出がONの場合のみ、候補枠判定を実行
             if (isAutoDetectionEnabled) {
                 const hitCandidate = autoCandidates.find(c => 
                     c.pageIdx === tappedPageIdx &&
@@ -1389,7 +1199,6 @@ function detectRectCandidates() {
                 }
             }
 
-            // 2. 自動検出がOFFまたは候補枠外の場合は手動（2点タップ指定）
             if (!selectionStart) {
                 selectionStart = { x: worldX, y: worldY };
             } else {
@@ -1420,7 +1229,6 @@ function detectRectCandidates() {
             const ctx = sCanvas.getContext('2d'); ctx.clearRect(0,0,sCanvas.width, sCanvas.height);
             const getPageOffset = (idx) => { let y = 0; for(let i=0; i<idx; i++) y += allPages[i].height; return y; };
 
-            // 自動認識候補の描画（機能がONの時のみ描画）
             if (isAutoDetectionEnabled) {
                 autoCandidates.forEach(cand => {
                     const py = getPageOffset(cand.pageIdx);
@@ -1433,7 +1241,6 @@ function detectRectCandidates() {
                 });
             }
 
-            // 確定済み設問枠の描画
             questions.forEach((q, i) => {
                 if (!q.rect) return;
                 const py = getPageOffset(q.rect.pageIdx);
