@@ -657,10 +657,10 @@
                 const resp = await fetch(url, {
                     method: 'GET',
                     headers: {
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        'apikey': SUPABASE_ANON_KEY
                     }
                 });
+
                 if (resp.ok) {
                     const list = await resp.json();
                     if (list && list.length > 0) data = list[0];
