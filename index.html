@@ -594,10 +594,10 @@
             try {
                 const headers = {
                     'apikey': SUPABASE_ANON_KEY,
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
                     'Content-Type': 'application/json',
                     'Prefer': 'return=representation'
                 };
+
 
                 let endpoint = `${SUPABASE_URL}/rest/v1/tests?apikey=${encodeURIComponent(SUPABASE_ANON_KEY)}`;
                 let method = 'POST';
