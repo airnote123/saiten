@@ -881,96 +881,378 @@
             updateGuide();
         }
 
-        function detectRectCandidates() {
-            autoCandidates = [];
-            let currentY = 0;
+function detectRectCandidates() {
+    autoCandidates = [];
 
-            allPages.forEach((pageCanvas, pageIdx) => {
-                const w = pageCanvas.width;
-                const h = pageCanvas.height;
-                const ctx = pageCanvas.getContext('2d');
-                const imgData = ctx.getImageData(0, 0, w, h);
-                const data = imgData.data;
+    allPages.forEach((pageCanvas, pageIdx) => {
+        const w = pageCanvas.width;
+        const h = pageCanvas.height;
+        const ctx = pageCanvas.getContext('2d');
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const data = imgData.data;
 
-                // 検出用の解像度ダウンサンプリング（高速化）
-                const scale = 0.25;
-                const sw = Math.floor(w * scale);
-                const sh = Math.floor(h * scale);
-                const grid = new Uint8Array(sw * sh);
+        // 検出用画像の縮小率
+        const scale = 0.35;
+        const sw = Math.floor(w * scale);
+        const sh = Math.floor(h * scale);
 
-                // 2値化処理（黒っぽい部分を1に設定）
-                for (let y = 0; y < sh; y++) {
-                    for (let x = 0; x < sw; x++) {
-                        const origX = Math.floor(x / scale);
-                        const origY = Math.floor(y / scale);
-                        const idx = (origY * w + origX) * 4;
-                        const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-                        if (brightness < 180) { // 暗い（線・枠・文字）部分
-                            grid[y * sw + x] = 1;
-                        }
-                    }
+        const mask = new Uint8Array(sw * sh);
+
+        // --------------------------------
+        // 1. 二値化
+        // --------------------------------
+        for (let y = 0; y < sh; y++) {
+            for (let x = 0; x < sw; x++) {
+                const ox = Math.min(w - 1, Math.floor(x / scale));
+                const oy = Math.min(h - 1, Math.floor(y / scale));
+                const idx = (oy * w + ox) * 4;
+
+                const brightness =
+                    (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+
+                if (brightness < 180) {
+                    mask[y * sw + x] = 1;
                 }
+            }
+        }
 
-                // 水平・垂直線プロファイルを用いたバウンディングボックスの簡易検出
-                const visited = new Uint8Array(sw * sh);
-                for (let y = 0; y < sh; y += 4) {
-                    for (let x = 0; x < sw; x += 4) {
-                        if (grid[y * sw + x] === 1 && !visited[y * sw + x]) {
-                            let minX = x, maxX = x, minY = y, maxY = y;
-                            const queue = [[x, y]];
-                            visited[y * sw + x] = 1;
-                            let count = 0;
+        // --------------------------------
+        // 2. 短い線の切れ目を補う
+        // --------------------------------
+        // 8方向について、短い空白を補間する。
+        // 長い点線・破線を実線として扱わないよう、
+        // 補間距離は最大2ピクセルに制限する。
+        const directions = [
+            [1, 0],
+            [0, 1],
+            [1, 1],
+            [1, -1],
+            [-1, 1],
+            [-1, -1],
+            [-1, 0],
+            [0, -1]
+        ];
 
-                            while (queue.length > 0 && count < 2000) {
-                                const [cx, cy] = queue.pop();
-                                count++;
-                                if (cx < minX) minX = cx;
-                                if (cx > maxX) maxX = cx;
-                                if (cy < minY) minY = cy;
-                                if (cy > maxY) maxY = cy;
+        const bridge = new Uint8Array(mask);
 
-                                const neighbors = [[cx+2, cy], [cx-2, cy], [cx, cy+2], [cx, cy-2]];
-                                for (let i = 0; i < neighbors.length; i++) {
-                                    const [nx, ny] = neighbors[i];
-                                    if (nx >= 0 && nx < sw && ny >= 0 && ny < sh) {
-                                        const nidx = ny * sw + nx;
-                                        if (grid[nidx] === 1 && !visited[nidx]) {
-                                            visited[nidx] = 1;
-                                            queue.push([nx, ny]);
-                                        }
-                                    }
+        for (let y = 0; y < sh; y++) {
+            for (let x = 0; x < sw; x++) {
+                if (!mask[y * sw + x]) continue;
+
+                for (const [dx, dy] of directions) {
+                    for (let distance = 2; distance <= 3; distance++) {
+                        const nx = x + dx * distance;
+                        const ny = y + dy * distance;
+
+                        if (
+                            nx < 0 || nx >= sw ||
+                            ny < 0 || ny >= sh
+                        ) {
+                            continue;
+                        }
+
+                        if (mask[ny * sw + nx]) {
+                            for (let k = 1; k < distance; k++) {
+                                const bx = x + dx * k;
+                                const by = y + dy * k;
+
+                                if (
+                                    bx >= 0 && bx < sw &&
+                                    by >= 0 && by < sh
+                                ) {
+                                    bridge[by * sw + bx] = 1;
                                 }
                             }
-
-                            const boxW = (maxX - minX) / scale;
-                            const boxH = (maxY - minY) / scale;
-                            const boxX = minX / scale;
-                            const boxY = minY / scale;
-
-                            if (boxW > 80 && boxH > 40 && boxW < w * 0.95 && boxH < h * 0.8) {
-                                autoCandidates.push({
-                                    x: boxX,
-                                    y: boxY,
-                                    w: boxW,
-                                    h: boxH,
-                                    pageIdx: pageIdx
-                                });
-                            }
+                            break;
                         }
                     }
                 }
-                currentY += h;
-            });
-
-            autoCandidates = filterOverlappingCandidates(autoCandidates);
-
-            if (autoCandidates.length === 0) {
-                alert("明確な枠が見つかりませんでした。手動で範囲選択を行ってください。");
-            } else {
-                alert(`${autoCandidates.length} 個の枠候補を検出しました！`);
             }
-            drawSelection();
         }
+
+        // --------------------------------
+        // 3. 連結成分を抽出
+        // --------------------------------
+        const visited = new Uint8Array(sw * sh);
+        const neighbors = [
+            [-1, -1], [0, -1], [1, -1],
+            [-1, 0],           [1, 0],
+            [-1, 1],  [0, 1],  [1, 1]
+        ];
+
+        for (let startY = 0; startY < sh; startY++) {
+            for (let startX = 0; startX < sw; startX++) {
+                const startIndex = startY * sw + startX;
+
+                if (!bridge[startIndex] || visited[startIndex]) {
+                    continue;
+                }
+
+                const queue = [startIndex];
+                visited[startIndex] = 1;
+
+                const points = [];
+
+                let minX = startX;
+                let maxX = startX;
+                let minY = startY;
+                let maxY = startY;
+
+                let head = 0;
+
+                while (head < queue.length && points.length < 30000) {
+                    const index = queue[head++];
+                    const x = index % sw;
+                    const y = Math.floor(index / sw);
+
+                    points.push([x, y]);
+
+                    minX = Math.min(minX, x);
+                    maxX = Math.max(maxX, x);
+                    minY = Math.min(minY, y);
+                    maxY = Math.max(maxY, y);
+
+                    for (const [dx, dy] of neighbors) {
+                        const nx = x + dx;
+                        const ny = y + dy;
+
+                        if (
+                            nx < 0 || nx >= sw ||
+                            ny < 0 || ny >= sh
+                        ) {
+                            continue;
+                        }
+
+                        const ni = ny * sw + nx;
+
+                        if (bridge[ni] && !visited[ni]) {
+                            visited[ni] = 1;
+                            queue.push(ni);
+                        }
+                    }
+                }
+
+                // 小さすぎる成分を除外
+                if (points.length < 80) continue;
+
+                const boxW = maxX - minX;
+                const boxH = maxY - minY;
+
+                if (
+                    boxW < 80 * scale ||
+                    boxH < 40 * scale ||
+                    boxW > sw * 0.95 ||
+                    boxH > sh * 0.8
+                ) {
+                    continue;
+                }
+
+                // --------------------------------
+                // 4. 主成分方向を計算
+                // --------------------------------
+                // 枠全体の傾きを推定する。
+                const centerX =
+                    points.reduce((s, p) => s + p[0], 0) / points.length;
+                const centerY =
+                    points.reduce((s, p) => s + p[1], 0) / points.length;
+
+                let xx = 0;
+                let yy = 0;
+                let xy = 0;
+
+                for (const [x, y] of points) {
+                    const dx = x - centerX;
+                    const dy = y - centerY;
+
+                    xx += dx * dx;
+                    yy += dy * dy;
+                    xy += dx * dy;
+                }
+
+                const angle =
+                    0.5 * Math.atan2(2 * xy, xx - yy);
+
+                const cos = Math.cos(angle);
+                const sin = Math.sin(angle);
+
+                // --------------------------------
+                // 5. 傾いた枠の4辺を検査
+                // --------------------------------
+                const projected = [];
+
+                let minU = Infinity;
+                let maxU = -Infinity;
+                let minV = Infinity;
+                let maxV = -Infinity;
+
+                for (const [x, y] of points) {
+                    const dx = x - centerX;
+                    const dy = y - centerY;
+
+                    const u = dx * cos + dy * sin;
+                    const v = -dx * sin + dy * cos;
+
+                    projected.push([u, v]);
+
+                    minU = Math.min(minU, u);
+                    maxU = Math.max(maxU, u);
+                    minV = Math.min(minV, v);
+                    maxV = Math.max(maxV, v);
+                }
+
+                const rectW = maxU - minU;
+                const rectH = maxV - minV;
+
+                if (rectW < 80 * scale || rectH < 40 * scale) {
+                    continue;
+                }
+
+                // 12°を超える傾きは対象外
+                const angleDeg = Math.abs(angle * 180 / Math.PI);
+
+                if (
+                    angleDeg > 12 &&
+                    Math.abs(angleDeg - 90) > 12
+                ) {
+                    continue;
+                }
+
+                // 4辺それぞれの線の連続性を確認
+                const binsU = Math.max(1, Math.ceil(rectW));
+                const binsV = Math.max(1, Math.ceil(rectH));
+
+                const top = new Uint8Array(binsU);
+                const bottom = new Uint8Array(binsU);
+                const left = new Uint8Array(binsV);
+                const right = new Uint8Array(binsV);
+
+                const tolerance = 2.5;
+
+                for (const [u, v] of projected) {
+                    const bu = Math.floor(u - minU);
+                    const bv = Math.floor(v - minV);
+
+                    if (bu >= 0 && bu < binsU) {
+                        if (Math.abs(v - minV) <= tolerance) {
+                            top[bu] = 1;
+                        }
+
+                        if (Math.abs(v - maxV) <= tolerance) {
+                            bottom[bu] = 1;
+                        }
+                    }
+
+                    if (bv >= 0 && bv < binsV) {
+                        if (Math.abs(u - minU) <= tolerance) {
+                            left[bv] = 1;
+                        }
+
+                        if (Math.abs(u - maxU) <= tolerance) {
+                            right[bv] = 1;
+                        }
+                    }
+                }
+
+                function coverage(arr) {
+                    let count = 0;
+                    let longest = 0;
+                    let current = 0;
+
+                    for (const value of arr) {
+                        if (value) {
+                            count++;
+                            current++;
+                            longest = Math.max(longest, current);
+                        } else {
+                            current = 0;
+                        }
+                    }
+
+                    return {
+                        ratio: count / arr.length,
+                        longest: longest / arr.length
+                    };
+                }
+
+                const edgeScores = [
+                    coverage(top),
+                    coverage(bottom),
+                    coverage(left),
+                    coverage(right)
+                ];
+
+                // 4辺がある程度連続していることを要求
+                const validEdges = edgeScores.every(score =>
+                    score.ratio >= 0.35 &&
+                    score.longest >= 0.20
+                );
+
+                if (!validEdges) continue;
+
+                // --------------------------------
+                // 6. 回転した矩形を通常の矩形に戻す
+                // --------------------------------
+                const corners = [
+                    [minU, minV],
+                    [maxU, minV],
+                    [maxU, maxV],
+                    [minU, maxV]
+                ];
+
+                const originalCorners = corners.map(([u, v]) => {
+                    return [
+                        centerX + u * cos - v * sin,
+                        centerY + u * sin + v * cos
+                    ];
+                });
+
+                const finalMinX = Math.min(
+                    ...originalCorners.map(p => p[0])
+                );
+                const finalMaxX = Math.max(
+                    ...originalCorners.map(p => p[0])
+                );
+                const finalMinY = Math.min(
+                    ...originalCorners.map(p => p[1])
+                );
+                const finalMaxY = Math.max(
+                    ...originalCorners.map(p => p[1])
+                );
+
+                const candidate = {
+                    x: finalMinX / scale,
+                    y: finalMinY / scale,
+                    w: (finalMaxX - finalMinX) / scale,
+                    h: (finalMaxY - finalMinY) / scale,
+                    pageIdx: pageIdx
+                };
+
+                // ページ外・極端に大きい候補を除外
+                if (
+                    candidate.x < 0 ||
+                    candidate.y < 0 ||
+                    candidate.x + candidate.w > w * 1.02 ||
+                    candidate.y + candidate.h > h * 1.02
+                ) {
+                    continue;
+                }
+
+                autoCandidates.push(candidate);
+            }
+        }
+    });
+
+    // 重複候補を除去
+    autoCandidates = filterOverlappingCandidates(autoCandidates);
+
+    if (autoCandidates.length === 0) {
+        alert("明確な枠が見つかりませんでした。手動で範囲選択を行ってください。");
+    } else {
+        alert(`${autoCandidates.length} 個の枠候補を検出しました！`);
+    }
+
+    drawSelection();
+}
 
         function filterOverlappingCandidates(candidates) {
             const result = [];
